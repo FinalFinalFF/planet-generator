@@ -750,6 +750,96 @@ textarea {
   color: var(--ff-text-muted);
 }
 
+/* ---------- batch mode ---------- */
+
+.batch {
+  position: fixed;
+  inset: var(--header-h) 0 0 0;
+  z-index: 150;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--ff-bg);
+}
+
+.batch__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  background: var(--ff-surface);
+  border-bottom: 1px solid var(--ff-divider);
+}
+
+.batch__bar .seg {
+  width: 210px;
+  flex: none;
+}
+
+.batch__title {
+  font-family: var(--ff-font-display-regular);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.batch__grid {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  overflow-y: auto;
+  align-content: start;
+}
+
+.batch__cell {
+  margin: 0;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-surface);
+}
+
+.batch__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 5px 6px;
+  border-top: 1px solid var(--ff-divider-soft);
+}
+
+.batch__seed {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  color: var(--ff-text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- drop target ---------- */
+
+.dropzone {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.dropzone__inner {
+  padding: var(--space-5) var(--space-6, 40px);
+  background: var(--ff-surface);
+  border: 2px dashed var(--ff-accent);
+  text-align: center;
+}
+
+.dropzone__title {
+  font-family: var(--ff-font-display-regular);
+  font-size: 20px;
+  margin-bottom: var(--space-2);
+}
+
 .offstage {
   position: absolute;
   width: 1px;

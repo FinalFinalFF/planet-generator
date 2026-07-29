@@ -26,6 +26,42 @@ Two consequences worth knowing:
 - **Blend modes are inline `mix-blend-mode`.** They render in every modern
   browser, including when the exported file is opened standalone or loaded as an
   `<img>`, which is also the PNG rasterization path.
+- **Tiled patterns are expanded on SVG export** (Export → *Expand pattern
+  tiles*, on by default). See below.
+
+### Pattern fills and design tools
+
+Tiled pattern layers paint as `<rect fill="url(#somePattern)">`. That is correct
+SVG and renders in every browser, but **design-tool importers commonly ignore
+`<pattern>` fills** — Figma drops them, which leaves the gradient with no texture
+at all while the PNG of the same document looks right.
+
+So SVG export rewrites each pattern fill into the tiles it would have painted:
+same geometry, same paint, stamped explicitly. The rewrite happens on the export
+clone, hoists the tile's own `<defs>` once (cloning them per tile would repeat
+their ids), and clips each tile to its cell because several source patterns
+overhang their viewBox. Verified pixel-equivalent to the `<pattern>` version —
+the only difference is 1px of antialiasing along edges.
+
+It costs size: roughly 3–4× for a mid-size pattern. Turn it off for a small,
+browser-only file. PNG export never expands, since the rasterizer tiles correctly
+and expanding would only bloat the intermediate string.
+
+Expansion is skipped, with a warning, for a layer needing more than 900 tiles or
+whose expansion would exceed 16 MB — tile count alone is a poor guard when the
+source patterns range from 12 kB to 330 kB of markup.
+
+## Importing patterns
+
+Drop `.svg` files anywhere on the app. Each one runs through the *same*
+`parsePatternSvg` as the built-in library, so it gets identical fill extraction,
+OKLab colour grouping, plate detection and palette-slot mapping — then shows up in
+the pattern pickers (tagged `(imported)`) and becomes eligible for Remix.
+
+Imports are kept in localStorage so a composition survives a reload, but bounded:
+512 KB per file and 3 MB in total, because these files run to hundreds of KB and
+blowing the quota would take the document and presets down with it. Anything over
+budget stays in memory for the session and says so.
 
 ## Pattern pipeline
 
@@ -155,11 +191,38 @@ exactly — including which palette **Remix All** picked.
 | **Shuffle colors** (`S`) | Re-deals palette slots, touching no geometry |
 | Per-section ⟳ | That section only — Background, Planet, Layers, Shading, Accents |
 | Palette ⟳ | Switches to a random palette, changing nothing else |
+| **Batch** (`B`) | An N-up grid of remixes to cherry-pick from |
 
 The per-section dice is the inverse of the locks and is implemented by inverting
 them, so there is only one code path deciding what randomizing a section means.
 It deliberately leaves `doc.seed` alone: the header seed reproduces a *full*
 remix, and a partial one is an edit like moving a slider.
+
+### Batch mode
+
+**Batch** (`B`) replaces the stage with an N-up grid (3×3 to 5×5) of seeded
+remixes of the current document, so a run can be cherry-picked instead of stepped
+through one Remix at a time. **Promote** loads a cell into the editor.
+
+Cell seeds derive from the batch seed (`batch-xxxxxx-1`, `-2`, …), so a batch is
+reproducible and *Regenerate* is just a new batch seed. **Vary palette** gives
+each cell its own palette, and is disabled while colors are locked.
+
+**Export all (zip)** writes every cell as SVG, PNG, or both. Each cell is a real
+`PlanetSvg`, and the export serializes those live nodes — the same path the
+single-file export uses — so a file from a batch is identical to promoting that
+cell and exporting it on its own.
+
+The zip is built by `lib/zip.ts`, a store-only ZIP writer with no dependency.
+Deflate is skipped on purpose: PNGs are already compressed, and a compression
+library is not worth a dependency in an app that otherwise ships only React.
+
+### Pattern layer count
+
+**Lock pattern layer count** in the Layers section pins how many pattern layers a
+remix produces while still letting it re-roll what each one is. That is the way to
+stay at, say, a single texture without giving up randomization inside it. It is
+separate from the section `LOCK`, which freezes the layers outright.
 
 ### Locks are absolute
 
@@ -171,14 +234,15 @@ rule, and the UI disables the controls a lock has made inert.
 The RNG stream is still consumed in a fixed order whether or not a section is
 locked, so toggling one lock does not shift what the others produce.
 
-Keyboard: `R` remix, `⇧R` remix all, `S` shuffle colors, `⌘Z` / `⇧⌘Z`
-undo/redo.
+Keyboard: `R` remix, `⇧R` remix all, `S` shuffle colors, `E` export SVG, `B`
+batch, `Esc` close batch, `⌘Z` / `⇧⌘Z` undo/redo. `E` uses the same
+transparent-background toggle as the Export panel.
 
 ## Persistence
 
 Document, custom palettes, named presets, and UI preferences live in
-localStorage under `planetgen.*`. Every read is defensive and falls back to the
-shipped default on bad data.
+localStorage under `planetgen.*`, along with imported patterns. Every read is
+defensive and falls back to the shipped default on bad data.
 
 Documents are at `DOC_VERSION` 2. Older ones are **migrated** by `normalizeDoc`
 rather than discarded, which matters because presets store whole documents — a

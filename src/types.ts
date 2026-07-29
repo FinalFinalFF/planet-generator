@@ -254,6 +254,13 @@ export type PlanetDoc = {
   planet: Planet
   layers: Layer[]
   locks: Locks
+  /**
+   * Freeze how many pattern layers a remix produces, while still letting it
+   * re-roll what each one is. Separate from `locks.patterns`, which freezes the
+   * layers wholesale — this keeps a composition simple (say, one texture) without
+   * giving up randomization inside it.
+   */
+  lockPatternCount: boolean
 }
 
 export type Preset = {

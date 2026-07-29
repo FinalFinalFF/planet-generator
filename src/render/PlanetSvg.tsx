@@ -317,7 +317,9 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
     const ref = layer.colors[g.index]
     return { hex: resolveColor(ref ?? { slot: g.index }, palette), alpha: refAlpha(ref) }
   })
-  const markup = recolor(parsed, resolveTokens(parsed, paints))
+  // Unique per layer and per host <svg>, so two layers on the same pattern — or
+  // the editor preview alongside a batch cell — cannot share internal ids.
+  const markup = recolor(parsed, resolveTokens(parsed, paints), `${prefix}-${layer.id}`)
   const contentId = `${prefix}-pc-${layer.id}`
   const ox = layer.offsetX * d
   const oy = layer.offsetY * d

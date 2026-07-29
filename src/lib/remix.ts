@@ -1,9 +1,16 @@
 /**
  * Seeded remix. Same seed + same palette + same locks ⇒ same output.
  *
- * Each locked section short-circuits to the incoming value, so the RNG stream
- * is consumed in a fixed order regardless of which sections are frozen — that
- * keeps unlocked sections stable when you toggle an unrelated lock.
+ * **Draws always.** Every section's candidate is computed unconditionally and in
+ * a fixed order; the locks are then applied as a pure selection between the
+ * candidate and the incoming value. A locked section still runs its draws and
+ * throws the result away, so toggling one lock never shifts what an unrelated
+ * unlocked section produces for the same seed.
+ *
+ * When adding to this function, never branch on a lock in a way that changes how
+ * many values are drawn — compute both, then choose. The draw count may depend
+ * on doc state (how many layers exist, `lockPatternCount`) and on earlier draws;
+ * it must not depend on `doc.locks`.
  *
  * **A lock is absolute.** Nothing in this module writes to a locked section:
  * not Remix, not Remix All, not Shuffle colors, not a per-section randomize.
@@ -13,7 +20,9 @@
 
 import {
   type AccentLayer,
+  type Background,
   type LayerMask,
+  type Planet,
   type PlanetMode,
   type SliceConfig,
   type BlendMode,
@@ -87,31 +96,35 @@ function remixGradient(rng: Rng, palette: Palette, prev: Gradient, lockColors: b
   const stopCount = type === 'conic' ? rng.int(5, 8) : rng.int(3, 5)
   const slots = dealRamp(rng, palette, stopCount)
 
-  let stops: GradientStop[]
-  if (lockColors) {
-    // Reuse the existing colors but re-space them.
-    const existing = prev.stops.slice().sort((a, b) => a.offset - b.offset)
-    const count = Math.max(2, existing.length)
-    stops = Array.from({ length: count }, (_, i) => ({
+  // Drawn unconditionally and discarded when colors are locked — see the
+  // draws-always rule in the module header.
+  const drawnStops: GradientStop[] = slots.map((slot, i) => {
+    const base = stopCount === 1 ? 0 : i / (stopCount - 1)
+    const jitter = i === 0 || i === stopCount - 1 ? 0 : rng.float(-0.05, 0.05)
+    return {
       id: nextId('s'),
-      offset: count === 1 ? 0 : i / (count - 1),
-      color: existing[i % existing.length].color,
-    }))
-  } else {
-    stops = slots.map((slot, i) => {
-      const base = stopCount === 1 ? 0 : i / (stopCount - 1)
-      const jitter = i === 0 || i === stopCount - 1 ? 0 : rng.float(-0.05, 0.05)
-      return {
-        id: nextId('s'),
-        offset: Math.max(0, Math.min(1, base + jitter)),
-        color: { slot } as ColorRef,
-      }
-    })
-    // A conic sweep should close on itself or it shows a hard seam.
-    if (type === 'conic' && stops.length > 2) {
-      stops[stops.length - 1] = { ...stops[stops.length - 1], color: { ...stops[0].color } }
+      offset: Math.max(0, Math.min(1, base + jitter)),
+      color: { slot } as ColorRef,
+    }
+  })
+  // A conic sweep should close on itself or it shows a hard seam.
+  if (type === 'conic' && drawnStops.length > 2) {
+    drawnStops[drawnStops.length - 1] = {
+      ...drawnStops[drawnStops.length - 1],
+      color: { ...drawnStops[0].color },
     }
   }
+
+  // Locked colors keep the existing colors but still get re-spaced.
+  const existing = prev.stops.slice().sort((a, b) => a.offset - b.offset)
+  const keptCount = Math.max(2, existing.length)
+  const stops: GradientStop[] = lockColors
+    ? Array.from({ length: keptCount }, (_, i) => ({
+        id: nextId('s'),
+        offset: keptCount === 1 ? 0 : i / (keptCount - 1),
+        color: existing[i % existing.length].color,
+      }))
+    : drawnStops
 
   // A conic whose convergence point lands mid-disc reads as a pinwheel, so
   // push it out near the limb where the terminator hides it.
@@ -175,11 +188,13 @@ function remixPatternLayer(
   const parsed = rng.pick(deps.available)
   const blend = rng.weighted(OVERLAY_BLENDS, [0.34, 0.22, 0.18, 0.14, 0.12])
   const fit = rng.bool(0.24) ? 'cover' : 'tile'
+  // Dealt unconditionally so the stream does not depend on the colors lock.
+  const dealtColors = remixPatternColors(rng, parsed, deps.palette, blend)
   const colors =
     lockColors && prev
       ? // Keep the palette assignment but stretch/trim to the new pattern.
         parsed.groups.map((g, i) => prev.colors[i] ?? prev.colors[prev.colors.length - 1] ?? { slot: 0, alpha: g.isBackground ? 0 : 1 })
-      : remixPatternColors(rng, parsed, deps.palette, blend)
+      : dealtColors
 
   // Most layers cover the whole disc; a minority get a feathered lens so
   // textures sometimes meet in patches instead of always blanketing the planet.
@@ -234,8 +249,11 @@ function remixShading(rng: Rng, palette: Palette, prev: ShadingLayer, lockColors
 
 function remixAccents(rng: Rng, palette: Palette, prev: AccentLayer, lockColors: boolean): AccentLayer {
   const deck = buildDeck(palette)
-  const pickAccent = (fallback: ColorRef): ColorRef =>
-    lockColors ? fallback : { slot: rng.pick([...deck.light, ...deck.mid]) }
+  // Draws either way; the lock only decides which value is used.
+  const pickAccent = (fallback: ColorRef): ColorRef => {
+    const drawn: ColorRef = { slot: rng.pick([...deck.light, ...deck.mid]) }
+    return lockColors ? fallback : drawn
+  }
 
   const ringCount = rng.weighted([0, 1, 1, 2, 3], [0.16, 0.3, 0.2, 0.24, 0.1])
   const rings = Array.from({ length: ringCount }, (_, i) => ({
@@ -300,34 +318,42 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
   const palette = deps.palette
   const deck = buildDeck(palette)
 
-  // --- background ---
-  const background = locks.background
-    ? doc.background
-    : (() => {
-        const kind = rng.weighted(['gradient', 'solid', 'transparent'] as const, [0.66, 0.28, 0.06])
-        const g = remixGradient(rng, palette, doc.background.gradient, locks.colors)
-        const bgGradient: Gradient = {
-          ...g,
-          // Backgrounds want a quiet, dark-leaning ramp.
-          type: rng.bool(0.6) ? 'radial' : 'linear',
-          stops: locks.colors
-            ? doc.background.gradient.stops
-            : [
-                { id: nextId('s'), offset: 0, color: { slot: deck.dark[rng.int(0, deck.dark.length - 1)] } },
-                { id: nextId('s'), offset: rng.float(0.5, 0.8), color: { slot: deck.dark[0] } },
-                { id: nextId('s'), offset: 1, color: { slot: deck.dark[0] } },
-              ],
-          radius: rng.float(0.7, 1.1),
-        }
-        return {
-          kind,
-          color: locks.colors ? doc.background.color : { slot: deck.dark[0] },
-          gradient: bgGradient,
-          vignette: rng.float(0.1, 0.5),
-        }
-      })()
+  const prevPatterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
+  const prevShading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
+  const prevAccents = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
 
-  // --- planet ---
+  /*
+   * Every section's candidate is built here, unconditionally and in a fixed
+   * order. Locks are applied afterwards, purely as a selection between the
+   * candidate and the incoming value. Nothing below may branch on a lock in a
+   * way that changes how many draws happen.
+   */
+
+  // --- background candidate ---
+  const bgKind = rng.weighted(['gradient', 'solid', 'transparent'] as const, [0.66, 0.28, 0.06])
+  const bgGradient = remixGradient(rng, palette, doc.background.gradient, locks.colors)
+  // Backgrounds want a quiet, dark-leaning ramp.
+  const bgRadial = rng.bool(0.6)
+  const bgStops: GradientStop[] = [
+    { id: nextId('s'), offset: 0, color: { slot: deck.dark[rng.int(0, deck.dark.length - 1)] } },
+    { id: nextId('s'), offset: rng.float(0.5, 0.8), color: { slot: deck.dark[0] } },
+    { id: nextId('s'), offset: 1, color: { slot: deck.dark[0] } },
+  ]
+  const bgRadius = rng.float(0.7, 1.1)
+  const bgVignette = rng.float(0.1, 0.5)
+  const backgroundCandidate: Background = {
+    kind: bgKind,
+    color: locks.colors ? doc.background.color : { slot: deck.dark[0] },
+    gradient: {
+      ...bgGradient,
+      type: bgRadial ? 'radial' : 'linear',
+      stops: locks.colors ? doc.background.gradient.stops : bgStops,
+      radius: bgRadius,
+    },
+    vignette: bgVignette,
+  }
+
+  // --- planet candidate ---
   const sliced = rng.bool(0.22)
   const slices: SliceConfig = {
     ...DEFAULT_SLICES,
@@ -346,58 +372,73 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
       [0.42, 0.28, 0.18, 0.12],
     ),
   }
+  const planetCx = rng.float(0.45, 0.55)
+  const planetCy = rng.float(0.45, 0.55)
+  const planetRadius = rng.float(0.5, 0.74)
+  const planetGradient = remixGradient(rng, palette, doc.planet.gradient, locks.colors)
+  // Short-circuits on `sliced`, which is itself a draw — so the stream still
+  // depends only on the seed, never on a lock.
+  const strokeEnabled = !sliced && rng.bool(0.18)
+  const strokeWidth = rng.float(1, 4)
+  const strokeOpacity = rng.float(0.25, 0.7)
+  const planetCandidate: Planet = {
+    ...doc.planet,
+    visible: true,
+    mode: (sliced ? 'sliced' : 'disc') as PlanetMode,
+    slices,
+    cx: planetCx,
+    cy: planetCy,
+    radius: planetRadius,
+    gradient: planetGradient,
+    stroke: {
+      ...doc.planet.stroke,
+      enabled: strokeEnabled,
+      width: strokeWidth,
+      color: locks.colors ? doc.planet.stroke.color : { slot: deck.light[0] },
+      opacity: strokeOpacity,
+    },
+  }
 
-  const planet = locks.planet
-    ? doc.planet
-    : {
-        ...doc.planet,
-        visible: true,
-        mode: (sliced ? 'sliced' : 'disc') as PlanetMode,
-        slices,
-        cx: rng.float(0.45, 0.55),
-        cy: rng.float(0.45, 0.55),
-        radius: rng.float(0.5, 0.74),
-        gradient: remixGradient(rng, palette, doc.planet.gradient, locks.colors),
-        stroke: {
-          ...doc.planet.stroke,
-          enabled: !sliced && rng.bool(0.18),
-          width: rng.float(1, 4),
-          color: locks.colors ? doc.planet.stroke.color : { slot: deck.light[0] },
-          opacity: rng.float(0.25, 0.7),
-        },
-      }
-
-  // --- layers ---
-  const prevPatterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
-  const prevShading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-  const prevAccents = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
+  // --- layer candidates ---
+  // `lockPatternCount` freezes how many layers there are without freezing what
+  // they contain. It reads doc state, not lock state, so it may legitimately
+  // change the draw count.
+  const rolledCount = rng.weighted([1, 2, 3], [0.3, 0.45, 0.25])
+  const patternCount =
+    deps.available.length === 0
+      ? 0
+      : doc.lockPatternCount
+        ? prevPatterns.length
+        : rolledCount
 
   // A slice lattice already carries the whole planet; heavy texture and a
-  // terminator on top of it just read as mud.
-  const slicedNow = planet.mode === 'sliced'
-  const patternCount =
-    deps.available.length === 0 ? 0 : rng.weighted([1, 2, 3], [0.3, 0.45, 0.25])
-  const patterns: PatternLayer[] = locks.patterns
-    ? prevPatterns
-    : Array.from({ length: patternCount }, (_, i) => {
-        const layer = remixPatternLayer(rng, deps, prevPatterns[i], locks.colors)
-        return slicedNow ? { ...layer, visible: i === 0 && rng.bool(0.35) } : layer
-      })
+  // terminator on top of it just read as mud. Taken from the *selected* planet,
+  // so a locked disc planet keeps its textures — hence the roll below is
+  // unconditional while its use is not.
+  const slicedNow = (locks.planet ? doc.planet : planetCandidate).mode === 'sliced'
 
-  const shading: ShadingLayer | null = prevShading
-    ? locks.shading
-      ? prevShading
-      : {
-          ...remixShading(rng, palette, prevShading, locks.colors),
-          visible: !slicedNow,
-        }
+  const patternCandidates: PatternLayer[] = Array.from({ length: patternCount }, (_, i) => {
+    const layer = remixPatternLayer(rng, deps, prevPatterns[i], locks.colors)
+    const hideForSlices = rng.bool(0.35)
+    return slicedNow ? { ...layer, visible: i === 0 && hideForSlices } : layer
+  })
+
+  // The layer-existence guards stay: a document with no shading layer really
+  // does consume fewer draws, because that is doc state. Only the lock guards go.
+  const shadingCandidate: ShadingLayer | null = prevShading
+    ? { ...remixShading(rng, palette, prevShading, locks.colors), visible: !slicedNow }
     : null
 
-  const accents: AccentLayer | null = prevAccents
-    ? locks.accents
-      ? prevAccents
-      : remixAccents(rng, palette, prevAccents, locks.colors)
+  const accentsCandidate: AccentLayer | null = prevAccents
+    ? remixAccents(rng, palette, prevAccents, locks.colors)
     : null
+
+  // --- apply the locks ---
+  const background = locks.background ? doc.background : backgroundCandidate
+  const planet = locks.planet ? doc.planet : planetCandidate
+  const patterns = locks.patterns ? prevPatterns : patternCandidates
+  const shading = locks.shading ? (prevShading ?? null) : shadingCandidate
+  const accents = locks.accents ? (prevAccents ?? null) : accentsCandidate
 
   // Stack order: patterns, then shading, with accents free to sit above or below.
   // The roll happens either way to keep the RNG stream fixed, but a locked

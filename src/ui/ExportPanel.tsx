@@ -5,6 +5,13 @@ export type ExportPanelProps = {
   seed: string
   canvas: { width: number; height: number }
   busy: boolean
+  /** Lifted to App so the E shortcut and the batch export use the same value. */
+  transparent: boolean
+  onTransparentChange: (v: boolean) => void
+  /** True when the Background section's fill is set to none. */
+  backgroundIsNone: boolean
+  expandPatterns: boolean
+  onExpandPatternsChange: (v: boolean) => void
   onExportSvg: (transparent: boolean) => void
   onExportPng: (longEdge: number, transparent: boolean) => void
   onCopySvg: (transparent: boolean) => void
@@ -17,11 +24,15 @@ export function ExportPanel({
   seed,
   canvas,
   busy,
+  transparent,
+  onTransparentChange,
+  backgroundIsNone,
+  expandPatterns,
+  onExpandPatternsChange,
   onExportSvg,
   onExportPng,
   onCopySvg,
 }: ExportPanelProps) {
-  const [transparent, setTransparent] = useState(false)
   const [custom, setCustom] = useState(3000)
   const longEdge = Math.max(canvas.width, canvas.height)
 
@@ -32,9 +43,32 @@ export function ExportPanel({
 
   return (
     <>
-      <Check label="Transparent background" checked={transparent} onChange={setTransparent} />
+      <Check
+        label="Transparent background"
+        checked={transparent || backgroundIsNone}
+        onChange={onTransparentChange}
+      />
+      {backgroundIsNone && (
+        <div className="note">
+          Background fill is set to <strong>none</strong>, so SVG and PNG exports are already
+          transparent whether or not this is ticked.
+        </div>
+      )}
       <div className="note">
-        Filenames use the seed: <strong>planet-{seed || 'seed'}.svg</strong>
+        Filenames use the seed: <strong>planet-{seed || 'seed'}.svg</strong>. This toggle also
+        applies to the <kbd>E</kbd> shortcut and to batch exports.
+      </div>
+
+      <Check
+        label="Expand pattern tiles"
+        checked={expandPatterns}
+        onChange={onExpandPatternsChange}
+      />
+      <div className="note">
+        On, tiled patterns are written out as real geometry. Browsers render an SVG
+        <code> &lt;pattern&gt;</code> fill fine, but design-tool importers commonly ignore it —
+        Figma drops it, leaving the gradient with no texture. Off gives a much smaller file that
+        is browser-only. PNG export never needs this.
       </div>
 
       <hr className="divider" />

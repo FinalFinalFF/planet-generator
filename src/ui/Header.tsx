@@ -16,6 +16,8 @@ export function Header({
   onSavePreset,
   onLoadPreset,
   onDeletePreset,
+  batchOpen,
+  onToggleBatch,
 }: {
   seed: string
   canUndo: boolean
@@ -32,6 +34,8 @@ export function Header({
   onSavePreset: (name: string) => void
   onLoadPreset: (id: string) => void
   onDeletePreset: (id: string) => void
+  batchOpen: boolean
+  onToggleBatch: () => void
 }) {
   const [draft, setDraft] = useState(seed)
   const [presetId, setPresetId] = useState('')
@@ -104,6 +108,17 @@ export function Header({
       </div>
 
       <div className="header__spacer" />
+
+      <div className="header__group">
+        <button
+          type="button"
+          className={`btn${batchOpen ? ' btn--active' : ''}`}
+          onClick={onToggleBatch}
+          title="Batch (B) — an N-up grid of remixes to cherry-pick from"
+        >
+          Batch
+        </button>
+      </div>
 
       <div className="header__group">
         <button

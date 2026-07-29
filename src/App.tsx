@@ -16,7 +16,16 @@ import {
 import { PLANET_STYLE_LABELS, type LockSection, type PlanetStyle } from './types'
 import { randomSeed } from './lib/rng'
 import { pickPalette, remix, remixSection, shuffleColors } from './lib/remix'
-import { getParsed, loadPattern, loadPatterns, PATTERN_SOURCES } from './lib/patterns/registry'
+import {
+  getParsed,
+  importPatternSvg,
+  listImported,
+  listPatternOptions,
+  loadPattern,
+  loadPatterns,
+  PATTERN_SOURCES,
+  rehydrateImported,
+} from './lib/patterns/registry'
 import type { ParsedPattern } from './lib/patterns/parse'
 import {
   downloadBlob,
@@ -26,6 +35,8 @@ import {
   serializeSvg,
 } from './lib/export'
 import * as storage from './lib/storage'
+import { BatchPanel, type BatchCell } from './ui/BatchPanel'
+import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 
 const SECTION_KEYS = [
   'canvas',
@@ -84,6 +95,14 @@ export default function App() {
 
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  // Lifted out of ExportPanel so the E shortcut and the batch export honour it.
+  const [transparent, setTransparent] = useState(false)
+  // Design-tool importers ignore <pattern> fills, so expanding is the default.
+  const [expandPatterns, setExpandPatterns] = useState(true)
+  // Bumped whenever the pattern library changes, to re-read the option list.
+  const [patternRev, setPatternRev] = useState(0)
   const svgRef = useRef<SVGSVGElement>(null)
 
   const notify = useCallback((text: string, error = false) => {
@@ -111,6 +130,13 @@ export default function App() {
   // has something to choose from immediately.
   useEffect(() => {
     let cancelled = false
+    // Imported patterns come back before anything asks for them, so a document
+    // that references one still renders after a reload.
+    const restored = rehydrateImported(storage.loadImportedPatterns())
+    if (restored.length > 0) {
+      ingest(restored)
+      setPatternRev((r) => r + 1)
+    }
     const needed = new Set<string>(DEFAULT_PATTERN_IDS)
     for (const layer of initial.layers) {
       if (layer.kind === 'pattern') needed.add(layer.patternId)
@@ -184,6 +210,11 @@ export default function App() {
   /* ---- remix ---- */
 
   const available = useMemo(() => [...parsedById.values()], [parsedById])
+  const patternOptions = useMemo(
+    () => listPatternOptions(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patternRev],
+  )
 
   const doRemix = useCallback(
     (seed?: string) => {
@@ -406,30 +437,77 @@ export default function App() {
     setPresets((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
+  const serializeOpts = useCallback(
+    (asTransparent: boolean) => ({
+      transparent: asTransparent,
+      expandPatterns,
+      onNote: notify,
+    }),
+    [expandPatterns, notify],
+  )
+
+  /* ---- pattern import ---- */
+
+  const importSvgFiles = useCallback(
+    async (files: File[]) => {
+      const svgs = files.filter(
+        (f) => f.type === 'image/svg+xml' || /\.svg$/i.test(f.name),
+      )
+      if (svgs.length === 0) {
+        return notify('Drop .svg files to add patterns', true)
+      }
+      const added: ParsedPattern[] = []
+      const failed: string[] = []
+      for (const file of svgs) {
+        try {
+          added.push(importPatternSvg(file.name, await file.text()))
+        } catch {
+          failed.push(file.name)
+        }
+      }
+      if (added.length > 0) {
+        ingest(added)
+        setPatternRev((r) => r + 1)
+        const dropped = storage.saveImportedPatterns(listImported())
+        const names = added.map((p) => p.name).join(', ')
+        if (dropped.length > 0) {
+          notify(
+            `Imported ${names} — too large to persist, so it will be gone after a reload`,
+            true,
+          )
+        } else {
+          notify(`Imported ${names}`)
+        }
+      }
+      if (failed.length > 0) notify(`Could not parse: ${failed.join(', ')}`, true)
+    },
+    [ingest, notify],
+  )
+
   /* ---- export ---- */
 
   const exportSvg = useCallback(
-    (transparent: boolean) => {
+    (asTransparent: boolean) => {
       const el = svgRef.current
       if (!el) return
-      downloadText(serializeSvg(el, { transparent }), planetFilename(doc.seed, 'svg'))
+      downloadText(serializeSvg(el, serializeOpts(asTransparent)), planetFilename(doc.seed, 'svg'))
       notify('SVG exported')
     },
-    [doc.seed, notify],
+    [doc.seed, notify, serializeOpts],
   )
 
   const copySvg = useCallback(
-    async (transparent: boolean) => {
+    async (asTransparent: boolean) => {
       const el = svgRef.current
       if (!el) return
       try {
-        await navigator.clipboard.writeText(serializeSvg(el, { transparent }))
+        await navigator.clipboard.writeText(serializeSvg(el, serializeOpts(asTransparent)))
         notify('SVG markup copied')
       } catch {
         notify('Clipboard access was blocked', true)
       }
     },
-    [notify],
+    [notify, serializeOpts],
   )
 
   const exportPng = useCallback(
@@ -438,7 +516,7 @@ export default function App() {
       if (!el) return
       setBusy(true)
       try {
-        const text = serializeSvg(el, { transparent })
+        const text = serializeSvg(el, { transparent, expandPatterns: false })
         const blob = await rasterizeSvg(
           text,
           doc.canvas.width,
@@ -457,6 +535,73 @@ export default function App() {
     [doc.canvas.height, doc.canvas.width, doc.seed, notify],
   )
 
+  /* ---- batch ---- */
+
+  const [batchFormat, setBatchFormat] = useState<'svg' | 'png' | 'both'>('svg')
+  const [batchPngSize, setBatchPngSize] = useState(1024)
+
+  /**
+   * Zip every cell up. The SVG text comes from each cell's live node, the same
+   * path the single-file export uses, so a batch file and a promoted-then-exported
+   * file are identical.
+   */
+  const exportBatch = useCallback(
+    async (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => {
+      setBusy(true)
+      try {
+        const entries: ZipEntry[] = []
+        const missing: string[] = []
+        for (const cell of cells) {
+          const el = nodes.get(cell.seed)
+          if (!el) {
+            missing.push(cell.seed)
+            continue
+          }
+          if (batchFormat === 'svg' || batchFormat === 'both') {
+            entries.push(
+              textEntry(
+                planetFilename(cell.seed, 'svg'),
+                serializeSvg(el, { transparent, expandPatterns }),
+              ),
+            )
+          }
+          if (batchFormat === 'png' || batchFormat === 'both') {
+            const png = await rasterizeSvg(
+              serializeSvg(el, { transparent, expandPatterns: false }),
+              cell.doc.canvas.width,
+              cell.doc.canvas.height,
+              batchPngSize,
+              transparent,
+            )
+            entries.push(await blobEntry(planetFilename(cell.seed, 'png'), png))
+          }
+        }
+        if (entries.length === 0) throw new Error('Nothing to export')
+        const zip = createZip(entries)
+        downloadBlob(zip, `planet-batch-${cells[0]?.seed.split('-').slice(0, 2).join('-') ?? 'set'}.zip`)
+        notify(
+          `Zipped ${entries.length} file${entries.length === 1 ? '' : 's'}` +
+            (missing.length > 0 ? ` — ${missing.length} cell(s) were not rendered` : ''),
+          missing.length > 0,
+        )
+      } catch (err) {
+        notify(err instanceof Error ? err.message : 'Batch export failed', true)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [batchFormat, batchPngSize, transparent, expandPatterns, notify],
+  )
+
+  const promoteBatchCell = useCallback(
+    (next: PlanetDoc) => {
+      replace(next)
+      setBatchOpen(false)
+      notify(`Promoted ${next.seed}`)
+    },
+    [replace, notify],
+  )
+
   /* ---- keyboard shortcuts ---- */
 
   useEffect(() => {
@@ -471,18 +616,67 @@ export default function App() {
         return
       }
       if (mod) return
-      if (e.key.toLowerCase() === 'r') {
+      const key = e.key.toLowerCase()
+      if (key === 'r') {
         e.preventDefault()
         if (e.shiftKey) doRemixAll()
         else doRemix()
-      } else if (e.key.toLowerCase() === 's') {
+      } else if (key === 's') {
         e.preventDefault()
         doShuffleColors()
+      } else if (key === 'e') {
+        e.preventDefault()
+        exportSvg(transparent)
+      } else if (key === 'b') {
+        e.preventDefault()
+        setBatchOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doRemix, doRemixAll, doShuffleColors, undo, redo])
+  }, [doRemix, doRemixAll, doShuffleColors, exportSvg, transparent, undo, redo])
+
+  /* ---- drag and drop pattern import ---- */
+
+  useEffect(() => {
+    let depth = 0
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files')
+
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      depth += 1
+      setDragging(true)
+    }
+    const onOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      // Without this the browser navigates to the dropped file instead.
+      e.preventDefault()
+    }
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      depth = Math.max(0, depth - 1)
+      if (depth === 0) setDragging(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      depth = 0
+      setDragging(false)
+      void importSvgFiles(Array.from(e.dataTransfer?.files ?? []))
+    }
+
+    window.addEventListener('dragenter', onEnter)
+    window.addEventListener('dragover', onOver)
+    window.addEventListener('dragleave', onLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onEnter)
+      window.removeEventListener('dragover', onOver)
+      window.removeEventListener('dragleave', onLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [importSvgFiles])
 
   if (!booted) {
     return <div className="boot">Parsing pattern library…</div>
@@ -505,6 +699,8 @@ export default function App() {
         onSavePreset={savePreset}
         onLoadPreset={loadPreset}
         onDeletePreset={deletePreset}
+        batchOpen={batchOpen}
+        onToggleBatch={() => setBatchOpen((v) => !v)}
       />
 
       <Stage
@@ -539,6 +735,7 @@ export default function App() {
         onApplyPlanetStyle={onApplyPlanetStyle}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}
+        patternOptions={patternOptions}
         palettePanel={{
           palettes,
           onSetActive: setActivePalette,
@@ -553,11 +750,46 @@ export default function App() {
           seed: doc.seed,
           canvas: doc.canvas,
           busy,
+          transparent,
+          onTransparentChange: setTransparent,
+          backgroundIsNone: doc.background.kind === 'transparent',
+          expandPatterns,
+          onExpandPatternsChange: setExpandPatterns,
           onExportSvg: exportSvg,
           onExportPng: exportPng,
           onCopySvg: copySvg,
         }}
       />
+
+      {batchOpen && (
+        <BatchPanel
+          doc={doc}
+          palettes={palettes}
+          parsedById={parsedById}
+          available={available}
+          transparent={transparent}
+          busy={busy}
+          format={batchFormat}
+          pngSize={batchPngSize}
+          onFormatChange={setBatchFormat}
+          onPngSizeChange={setBatchPngSize}
+          onClose={() => setBatchOpen(false)}
+          onPromote={promoteBatchCell}
+          onExportAll={exportBatch}
+        />
+      )}
+
+      {dragging && (
+        <div className="dropzone">
+          <div className="dropzone__inner">
+            <div className="dropzone__title">Drop SVGs to add patterns</div>
+            <div className="note">
+              Each file goes through the same fill extraction and palette-slot mapping as the
+              built-in library.
+            </div>
+          </div>
+        </div>
+      )}
 
       {bootError && <div className="toast toast--error">Pattern library: {bootError}</div>}
       {toast && <div className={`toast${toast.error ? ' toast--error' : ''}`}>{toast.text}</div>}

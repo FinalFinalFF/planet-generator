@@ -38,42 +38,55 @@ export function useDoc(initial: PlanetDoc): DocApi {
   const [history, setHistory] = useState<History>({ past: [], present: initial, future: [] })
   const lastCommit = useRef<{ key: string; at: number } | null>(null)
 
-  const replace = useCallback((next: PlanetDoc, opts: CommitOptions = {}) => {
-    setHistory((h) => {
-      if (next === h.present) return h
-      if (opts.transient) return { ...h, present: next }
-
-      const now = Date.now()
-      const prev = lastCommit.current
-      const coalesce =
-        opts.coalesce != null && prev?.key === opts.coalesce && now - prev.at < COALESCE_MS
-      lastCommit.current = opts.coalesce != null ? { key: opts.coalesce, at: now } : null
-
-      if (coalesce) return { past: h.past, present: next, future: [] }
-      const past = [...h.past, h.present].slice(-HISTORY_LIMIT)
-      return { past, present: next, future: [] }
-    })
+  /**
+   * Decide whether this commit coalesces into the previous one, and record it.
+   *
+   * Deliberately **outside** the `setHistory` updater. StrictMode double-invokes
+   * updaters to surface impurity, and writing `lastCommit` in there means the
+   * second invocation reads back its own write — same key, 0 ms ago — and takes
+   * the coalesce branch. The first commit of a slider drag would then never push
+   * a history entry, so undo behaved differently in dev than in the production
+   * build. Dev has to match prod, history included.
+   */
+  const beginCommit = useCallback((opts: CommitOptions): boolean => {
+    if (opts.transient) return false
+    const now = Date.now()
+    const prev = lastCommit.current
+    const coalesce =
+      opts.coalesce != null && prev?.key === opts.coalesce && now - prev.at < COALESCE_MS
+    lastCommit.current = opts.coalesce != null ? { key: opts.coalesce, at: now } : null
+    return coalesce
   }, [])
+
+  const replace = useCallback(
+    (next: PlanetDoc, opts: CommitOptions = {}) => {
+      // Committed before the updater runs, so a `next === h.present` no-op below
+      // still refreshes the coalesce window. Harmless: a commit that changes
+      // nothing has nothing to undo.
+      const coalesce = beginCommit(opts)
+      setHistory((h) => {
+        if (next === h.present) return h
+        if (opts.transient) return { ...h, present: next }
+        if (coalesce) return { past: h.past, present: next, future: [] }
+        return { past: [...h.past, h.present].slice(-HISTORY_LIMIT), present: next, future: [] }
+      })
+    },
+    [beginCommit],
+  )
 
   const update = useCallback(
     (recipe: (draft: PlanetDoc) => PlanetDoc, opts: CommitOptions = {}) => {
+      const coalesce = beginCommit(opts)
       setHistory((h) => {
+        // The recipe stays inside the updater: it is pure and needs fresh state.
         const next = recipe(h.present)
         if (next === h.present) return h
         if (opts.transient) return { ...h, present: next }
-
-        const now = Date.now()
-        const prev = lastCommit.current
-        const coalesce =
-          opts.coalesce != null && prev?.key === opts.coalesce && now - prev.at < COALESCE_MS
-        lastCommit.current = opts.coalesce != null ? { key: opts.coalesce, at: now } : null
-
         if (coalesce) return { past: h.past, present: next, future: [] }
-        const past = [...h.past, h.present].slice(-HISTORY_LIMIT)
-        return { past, present: next, future: [] }
+        return { past: [...h.past, h.present].slice(-HISTORY_LIMIT), present: next, future: [] }
       })
     },
-    [],
+    [beginCommit],
   )
 
   const undo = useCallback(() => {

@@ -23,7 +23,6 @@ import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
-import { PATTERN_SOURCES } from '../lib/patterns/registry'
 import { DEFAULT_LAYER_MASK, detectPlanetStyle, nextId } from '../lib/defaults'
 
 const BLEND_OPTIONS = BLEND_MODES.map((b) => ({ value: b, label: b }))
@@ -58,6 +57,8 @@ export type SidebarProps = {
   onRandomizeSection: (section: Exclude<LockSection, 'colors'>) => void
   /** The Palette section's dice picks a different palette. */
   onRandomizePalette: () => void
+  /** Built-in library plus anything imported this session. */
+  patternOptions: Array<{ id: string; name: string; imported: boolean }>
 }
 
 /* ---------- sliced-sphere controls ---------- */
@@ -528,6 +529,7 @@ function LayersSection({
   onAddPatternLayer,
   onSetLayerPattern,
   onRandomizeSection,
+  patternOptions,
 }: SidebarProps) {
   const patch = (id: string, recipe: (l: Layer) => Layer, coalesce?: string) =>
     update(
@@ -659,6 +661,7 @@ function LayersSection({
                       layer={layer}
                       palette={palette}
                       parsed={parsedById.get(layer.patternId)}
+                      patternOptions={patternOptions}
                       onSetPattern={(patternId) => onSetLayerPattern(layer.id, patternId)}
                       onPatch={(recipe, coalesce) =>
                         patch(layer.id, (l) => recipe(l as PatternLayer), coalesce)
@@ -690,7 +693,12 @@ function LayersSection({
         })}
       </div>
 
-      <AddLayerRow doc={doc} update={update} onAddPatternLayer={onAddPatternLayer} />
+      <AddLayerRow
+        doc={doc}
+        update={update}
+        onAddPatternLayer={onAddPatternLayer}
+        patternOptions={patternOptions}
+      />
     </Section>
   )
 }
@@ -699,12 +707,15 @@ function AddLayerRow({
   doc,
   update,
   onAddPatternLayer,
+  patternOptions,
 }: {
   doc: PlanetDoc
   update: SidebarProps['update']
   onAddPatternLayer: (patternId: string) => void
+  patternOptions: SidebarProps['patternOptions']
 }) {
-  const [patternId, setPatternId] = useState(PATTERN_SOURCES[0]?.id ?? '')
+  const [patternId, setPatternId] = useState(patternOptions[0]?.id ?? '')
+  const patternCount = doc.layers.filter((l) => l.kind === 'pattern').length
 
   const addShading = () =>
     update((d) => ({
@@ -778,9 +789,9 @@ function AddLayerRow({
             aria-label="Pattern to add"
             onChange={(e) => setPatternId(e.target.value)}
           >
-            {PATTERN_SOURCES.map((p) => (
+            {patternOptions.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.imported ? `${p.name} (imported)` : p.name}
               </option>
             ))}
           </select>
@@ -801,6 +812,23 @@ function AddLayerRow({
           + Accents
         </button>
       </div>
+
+      <hr className="divider" />
+      <Check
+        label={`Lock pattern layer count (${patternCount})`}
+        checked={doc.lockPatternCount}
+        onChange={(lockPatternCount) => update((d) => ({ ...d, lockPatternCount }))}
+      />
+      <div className="note">
+        Remix keeps this many pattern layers but still re-rolls what each one is — a way to stay
+        at one texture without giving up randomization inside it. The section LOCK freezes the
+        layers outright instead.
+      </div>
+      <div className="note">
+        Drop <strong>.svg</strong> files anywhere to add your own patterns — they run through the
+        same fill extraction and palette-slot mapping as the built-ins, and become available to
+        Remix. They are kept between reloads unless they are too large to store.
+      </div>
       <div className="note">
         {doc.layers.length} layer{doc.layers.length === 1 ? '' : 's'}. Pattern layers are clipped to
         the planet circle; accents are not, so moving one below the patterns puts a ring behind the
@@ -814,12 +842,14 @@ function PatternLayerEditor({
   layer,
   palette,
   parsed,
+  patternOptions,
   onSetPattern,
   onPatch,
 }: {
   layer: PatternLayer
   palette: Palette
   parsed: ParsedPattern | undefined
+  patternOptions: SidebarProps['patternOptions']
   onSetPattern: (patternId: string) => void
   onPatch: (recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) => void
 }) {
@@ -828,7 +858,10 @@ function PatternLayerEditor({
       <Select
         label="Pattern"
         value={layer.patternId}
-        options={PATTERN_SOURCES.map((p) => ({ value: p.id, label: p.name }))}
+        options={patternOptions.map((p) => ({
+          value: p.id,
+          label: p.imported ? `${p.name} (imported)` : p.name,
+        }))}
         onChange={onSetPattern}
       />
       <Segmented

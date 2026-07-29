@@ -57,6 +57,12 @@ const DRAWABLE_TAGS = new Set([
 const MAX_GROUPS = 8
 const MERGE_THRESHOLD = 0.085
 
+/**
+ * Placeholder for the per-instance id namespace, substituted alongside the color
+ * tokens in `recolor()`. Same `%%…%%` convention as `%%cN%%`.
+ */
+export const NS_TOKEN = '%%ns%%'
+
 /* ---------- geometry helpers ---------- */
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -218,16 +224,26 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function namespaceIds(markup: string, ns: string): string {
+/**
+ * Rewrite every internal id to `%%ns%%-{id}`.
+ *
+ * The namespace is a **placeholder resolved per instance at recolor time**, not
+ * the pattern id. Two layers using the same pattern — which remix produces
+ * routinely, since it picks with replacement — would otherwise inject duplicate
+ * ids into one document, and `url(#…)` resolves document-wide to the *first*
+ * match. The second instance would silently paint with the first one's colors,
+ * because recoloring rewrites gradient stops inside these very defs.
+ */
+function namespaceIds(markup: string): string {
   const ids = new Set<string>()
   for (const m of markup.matchAll(/\bid="([^"]+)"/g)) ids.add(m[1])
   let out = markup
   for (const id of [...ids].sort((a, b) => b.length - a.length)) {
     const e = escapeRe(id)
     out = out
-      .replace(new RegExp(`\\bid="${e}"`, 'g'), `id="${ns}-${id}"`)
-      .replace(new RegExp(`url\\(#${e}\\)`, 'g'), `url(#${ns}-${id})`)
-      .replace(new RegExp(`(\\bhref=")#${e}"`, 'g'), `$1#${ns}-${id}"`)
+      .replace(new RegExp(`\\bid="${e}"`, 'g'), `id="${NS_TOKEN}-${id}"`)
+      .replace(new RegExp(`url\\(#${e}\\)`, 'g'), `url(#${NS_TOKEN}-${id})`)
+      .replace(new RegExp(`(\\bhref=")#${e}"`, 'g'), `$1#${NS_TOKEN}-${id}"`)
   }
   return out
 }
@@ -326,7 +342,7 @@ export function parsePatternSvg(id: string, name: string, raw: string): ParsedPa
   // The host <svg> already declares the SVG namespace; per-child re-declarations
   // that the serializer adds are just noise in the exported file.
   template = template.replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '')
-  template = namespaceIds(template, `p${id.replace(/[^a-z0-9]/g, '')}`)
+  template = namespaceIds(template)
 
   // ---- group the colors ----
   const clusters = clusterColors(tokenColors, tokenWeight)

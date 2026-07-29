@@ -13,6 +13,14 @@ npm run typecheck   # tsc -b --noEmit
 `tsconfig.json` sets `noUnusedLocals`/`noUnusedParameters`, so an unused import
 fails the build, not just lint. There is no linter and no test framework.
 
+### Keep CHANGELOG.md current
+
+`CHANGELOG.md` is a **decision log**, not a commit summary. After substantive
+work, add an entry under `## Unreleased` covering the reasoning: why an approach
+was chosen, what was tried and abandoned, how a bug was found. Record reversals
+and dead ends too — the point is that a later session does not re-litigate a
+settled choice or re-introduce a fixed bug. Skip it for trivial edits.
+
 ### Verifying changes
 
 There are no automated tests — this is a visual tool, and correctness means "it
@@ -57,6 +65,18 @@ This forbids a whole class of otherwise-reasonable changes:
   distance to the **farthest box corner from the focus**, not the box diagonal —
   the focus moves off-center, so the diagonal under-covers.
 - **Blend modes are inline `mix-blend-mode`**, which survives serialization.
+- **`expandPatterns` is the one sanctioned exception** to pure serialization.
+  Tiled patterns paint as `<rect fill="url(#pat)">`, which is valid SVG and
+  renders in browsers, but design-tool importers commonly ignore `<pattern>`
+  fills — Figma drops them, so the SVG loses its texture while the PNG of the
+  same document keeps it. `expandPatternFills()` rewrites the fill into explicit
+  tiles on the *clone*: mechanical and equivalence-preserving, verified
+  pixel-equivalent apart from 1px of edge antialiasing. Two traps if you touch
+  it: hoist the tile's `<defs>` once (cloning per tile duplicates ids, and only
+  the first duplicate resolves), and clip each tile to its cell (`<pattern>`
+  clips tile content implicitly, and several source patterns overhang their
+  viewBox). PNG export passes `expandPatterns: false` — the rasterizer tiles
+  correctly and expanding only bloats the intermediate string.
 - **`data-role="background"`** marks the background group so the transparent
   export can drop it wholesale; `serializeSvg` then strips all `data-*`.
 
@@ -128,7 +148,14 @@ parts, all load-bearing:
   `pathIsFullBleed` is conservative on purpose — a single rectilinear subpath
   only; several files start with a huge multi-`M` path that would otherwise be
   misread as a plate.
-- **Ids are namespaced** so many patterns coexist in one `<defs>`.
+- **Ids are namespaced per rendered instance, not per pattern.** `parse.ts` emits
+  a `%%ns%%-{id}` placeholder and `recolor()` substitutes it alongside the colour
+  tokens; `PatternLayerView` passes `${prefix}-${layer.id}`. This must stay
+  per-instance: `url(#…)` resolves document-wide to the *first* match, and
+  recolouring rewrites gradient stops inside these defs, so two layers sharing a
+  namespace makes the second paint with the first's colours. Two layers on one
+  `patternId` happen routinely (remix picks with replacement), as does the editor
+  preview coexisting with batch cells.
 - Alpha 0 emits `transparent`, not `#rrggbb00` — valid in `fill`, `stroke` and
   `stop-color` alike.
 
@@ -176,6 +203,19 @@ regardless of which sections are locked** — a locked section still runs its RN
 draws and throws the result away. Short-circuiting before the draws would shift
 every downstream section when an unrelated lock is toggled.
 
+Structurally, that means: compute every section's candidate unconditionally and in
+a fixed order, then apply the locks as a pure selection between the candidate and
+the incoming value. **Never branch on a lock in a way that changes how many values
+are drawn** — compute both and choose. The draw count may legitimately depend on
+doc state (how many layers exist, `lockPatternCount`, `prevPatterns.length`) and on
+earlier draws (`!sliced && rng.bool(…)`); it must not depend on `doc.locks`. The
+same rule applies inside `remixGradient`, `remixPatternLayer` and `remixAccents`,
+which each have a `lockColors` path.
+
+This was violated once and fixed — see CHANGELOG. If you change `remix()`, re-run
+a harness like the one described there, and sabotage it once to confirm it is not
+passing vacuously.
+
 **A lock is absolute** — this is a stated product rule, not an implementation
 detail. Nothing writes to a locked section: not Remix, not Remix All, not
 `shuffleColors`, not that section's own dice. Every exported entry point in
@@ -191,10 +231,44 @@ like moving a slider.
 `pickPalette()` lives in `remix.ts` rather than the caller so the seed drives the
 palette choice too — otherwise typing a seed back would not reproduce a Remix All.
 
+**Known, accepted limit:** `pickPalette` deliberately excludes the *current*
+palette, so consecutive Remix All presses always change palette rather than
+sometimes appearing to do nothing. The cost is that a Remix All seed reproduces its
+palette choice only from the same starting palette — the pool it picks from depends
+on `doc.paletteId`. This is a deliberate tradeoff, not a bug awaiting a fix; do not
+"correct" it by making the pool unconditional without also deciding that repeated
+Remix All should sometimes be a no-op.
+
 `dealRamp` builds gradient stop runs from a **contiguous, non-wrapping** slice of
 `slotsByLightness`, nudged so the run reaches the light end. Both constraints
 exist because a wrapping run can come out entirely dark, which renders as a black
 hole against a dark background rather than a planet.
+
+### Batch and zip export
+
+`ui/BatchPanel.tsx` renders N real `PlanetSvg` instances and hands their live
+nodes to `App.exportBatch`, which serializes them through the same
+`serializeSvg` the single-file export uses — that is what guarantees a batch file
+and a promoted-then-exported file are byte-identical. Every cell needs a distinct
+`idPrefix`: they all share one document, and defs are referenced by id.
+
+`lib/zip.ts` is a store-only ZIP writer (no deflate, no dependency). If you touch
+it, re-verify with real `unzip -t` rather than trusting that it looks right — a
+wrong CRC or central-directory offset produces a file that only fails when the
+user opens it. The harness pattern that caught this: build the zip in the browser,
+base64 it into a `<textarea>`, `--dump-dom`, decode, `unzip -t`.
+
+### Runtime pattern import
+
+Dropped SVGs go through `importPatternSvg` → the same `parsePatternSvg` as
+built-ins, so imports get identical fill extraction and palette mapping. The UI
+reads `listPatternOptions()` (built-ins + imports) via a `patternRev` counter in
+`App`, **not** `PATTERN_SOURCES` directly — a component that imports the static
+list will silently miss imports.
+
+Imports persist under a size budget (`storage.saveImportedPatterns` returns the
+ids that did not fit). The cap exists because localStorage is shared with the
+document and presets, and one 2 MB SVG would take those down with it.
 
 ### Doc migration
 
@@ -212,10 +286,9 @@ The look to match is **crisp ink** — flat color, `normal` blend, high opacity,
 large scale — not low-opacity soft-light washes. Defaults and remix weighting are
 tuned that way; keep them there.
 
-`CLAUDE-CODE-PROMPTS.md` is the original brief. **Prompts 1 and 2 are
-implemented; Prompt 3 is not** — no batch/N-up grid, no zip export, no
-drag-and-drop pattern import at runtime. Keyboard shortcuts are `R` / `⇧R` /
-`S` / undo / redo.
+`CLAUDE-CODE-PROMPTS.md` is the original brief. **All three prompts are
+implemented.** Keyboard shortcuts are `R`, `⇧R`, `S`, `E`, `B`, `Esc`, and
+`⌘Z` / `⇧⌘Z`.
 
 ## Editor chrome
 

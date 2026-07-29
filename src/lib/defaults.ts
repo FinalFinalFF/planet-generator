@@ -291,6 +291,7 @@ export function defaultDoc(seed: string): PlanetDoc {
       stroke: { enabled: false, width: 2, color: { slot: 7 }, opacity: 0.4 },
     },
     layers,
+    lockPatternCount: false,
     locks: {
       colors: false,
       planet: false,
@@ -321,7 +322,13 @@ export function normalizeDoc(doc: PlanetDoc): PlanetDoc {
       ? { ...layer, mask: { ...DEFAULT_LAYER_MASK, ...(layer.mask ?? {}) } }
       : layer,
   )
-  return { ...doc, version: DOC_VERSION, planet, layers }
+  return {
+    ...doc,
+    version: DOC_VERSION,
+    planet,
+    layers,
+    lockPatternCount: doc.lockPatternCount ?? false,
+  }
 }
 
 /* ---------- planet style recipes ---------- */

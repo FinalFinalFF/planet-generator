@@ -39,9 +39,71 @@ export function loadPatterns(ids: readonly string[]): Promise<ParsedPattern[]> {
   return Promise.all([...new Set(ids)].map(loadPattern))
 }
 
-/** Runtime-registered pattern (drag-and-dropped by the user, or synthetic). */
-export function registerParsed(parsed: ParsedPattern): void {
-  cache.set(parsed.id, parsed)
+/* ---------- runtime-imported patterns ---------- */
+
+export type ImportedPattern = { id: string; name: string; raw: string }
+
+/** Ids of patterns the user dropped in, newest last. */
+const imported: ImportedPattern[] = []
+
+function uniqueId(base: string): string {
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'pattern'
+  let id = `u-${slug}`
+  let n = 2
+  while (cache.has(id) || getSource(id)) id = `u-${slug}-${n++}`
+  return id
+}
+
+/**
+ * Parse and register a dropped SVG through the same pipeline as the built-ins,
+ * so it gets identical fill extraction and palette-slot mapping.
+ */
+export function importPatternSvg(filename: string, raw: string): ParsedPattern {
+  const name = filename.replace(/\.svg$/i, '').trim() || 'Imported pattern'
+  const id = uniqueId(name)
+  const parsed = parsePatternSvg(id, name, raw)
+  cache.set(id, parsed)
+  imported.push({ id, name, raw })
+  return parsed
+}
+
+/** Re-register patterns restored from storage. Skips anything that fails. */
+export function rehydrateImported(list: ImportedPattern[]): ParsedPattern[] {
+  const out: ParsedPattern[] = []
+  for (const item of list) {
+    if (cache.has(item.id)) continue
+    try {
+      const parsed = parsePatternSvg(item.id, item.name, item.raw)
+      cache.set(item.id, parsed)
+      imported.push(item)
+      out.push(parsed)
+    } catch {
+      // A pattern that no longer parses is dropped rather than breaking boot.
+    }
+  }
+  return out
+}
+
+export function listImported(): ImportedPattern[] {
+  return imported.slice()
+}
+
+export function removeImported(id: string): void {
+  const i = imported.findIndex((p) => p.id === id)
+  if (i >= 0) imported.splice(i, 1)
+  cache.delete(id)
+}
+
+/**
+ * Every pattern that can currently be chosen: the built-in library plus
+ * anything imported this session. The UI reads this rather than
+ * `PATTERN_SOURCES` so imports show up in the pickers and in Remix.
+ */
+export function listPatternOptions(): Array<{ id: string; name: string; imported: boolean }> {
+  return [
+    ...PATTERN_SOURCES.map((s) => ({ id: s.id, name: s.name, imported: false })),
+    ...imported.map((p) => ({ id: p.id, name: p.name, imported: true })),
+  ]
 }
 
 export { PATTERN_SOURCES }
@@ -80,9 +142,25 @@ export function resolveTokens(parsed: ParsedPattern, paints: GroupPaint[]): stri
   return out
 }
 
-const TOKEN_RE = /%%c(\d+)%%/g
+/** Colors and the id namespace in one alternation, so recoloring stays one pass. */
+const TOKEN_RE = /%%(?:c(\d+)|ns)%%/g
 
-/** Apply resolved token colors to the template. */
-export function recolor(parsed: ParsedPattern, resolved: string[]): string {
-  return parsed.template.replace(TOKEN_RE, (_m, n: string) => resolved[Number(n)] ?? 'transparent')
+/**
+ * Apply resolved token colors and the instance id namespace to the template.
+ *
+ * `namespace` must be unique per rendered instance — per layer *and* per host
+ * `<svg>`. Internal ids are rewritten to `{namespace}-{id}`; two instances
+ * sharing a namespace in one document would give the second the first's colors,
+ * since `url(#…)` resolves document-wide to the first match.
+ */
+export function recolor(
+  parsed: ParsedPattern,
+  resolved: string[],
+  namespace: string,
+): string {
+  // Keep the namespace to characters that are valid in an XML id.
+  const ns = namespace.replace(/[^A-Za-z0-9_-]/g, '') || 'ns'
+  return parsed.template.replace(TOKEN_RE, (_m, n: string | undefined) =>
+    n === undefined ? ns : (resolved[Number(n)] ?? 'transparent'),
+  )
 }
