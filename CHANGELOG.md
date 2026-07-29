@@ -12,6 +12,35 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: fully transparent color literals parsed to opaque black
+
+`normalizeHex('transparent')` looked the keyword up in the named-color table,
+getting `#00000000`, then hit the 8-digit branch which strips alpha — yielding
+`#000000`. Alpha is tracked separately from the hex, so stripping it inverted the
+meaning: in pattern parsing, invisible source geometry became a paintable black
+ink group that showed up as soon as the pattern was recolored.
+
+`normalizeHex` now returns **null** for fully transparent literals — the keyword,
+`#rrggbb00`, and `#rgb0` — so they are treated as "not a color" and left untouched,
+exactly like `none`. Because the named table maps `transparent` to `#00000000`, the
+8-digit zero-alpha check covers the keyword too.
+
+All call sites were already null-safe, checked rather than assumed: `parse.ts`
+skips (`if (!hex) continue`) — that is the fix; `parseHexList` filters nulls;
+`resolveColor` and the palette swatch input fall back to `#000000` as before, so
+typing `transparent` into a hex override behaves the same as it always did. The
+`'transparent'` strings in `registry.ts` are recolor *output* for an alpha-0 group,
+not parsing, and are unaffected.
+
+`rgba(…, 0)` still normalizes to its opaque RGB — the rgb branch never read alpha,
+and that was left alone as out of scope.
+
+Verified with a temporary QA route (since deleted): a table of literals through
+`normalizeHex`, `isColorLiteral` and `parseHexList`, plus a synthetic pattern with
+`fill="transparent"`, `fill="#11223300"`, `fill="none"` and a `style="fill:transparent"`
+— asserting only white and black become color groups and the transparent fills
+survive verbatim in the template.
+
 ### Fixed: closing the tab inside the save debounce lost the last change
 
 `useDoc` debounces `saveDoc` by 350 ms and `App` debounces UI state by 300 ms.

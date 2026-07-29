@@ -51,7 +51,17 @@ const NAMED: Record<string, string> = {
   transparent: '#00000000',
 }
 
-/** Normalize any CSS color literal we care about to lowercase `#rrggbb`. Returns null if unparseable. */
+/**
+ * Normalize any CSS color literal we care about to lowercase `#rrggbb`. Returns
+ * null if unparseable.
+ *
+ * **Fully transparent literals also return null**, deliberately. Alpha is
+ * tracked separately, so stripping it would turn `transparent` — which is
+ * `#00000000` in the named table — into opaque black. In pattern parsing that
+ * promoted invisible source geometry into paintable black ink that appeared as
+ * soon as the pattern was recolored. Treating it as "not a color", the same as
+ * `none`, leaves such geometry untouched.
+ */
 export function normalizeHex(raw: string): string | null {
   if (!raw) return null
   let s = raw.trim().toLowerCase()
@@ -65,11 +75,15 @@ export function normalizeHex(raw: string): string | null {
   if (!s.startsWith('#')) return null
   const body = s.slice(1)
   if (body.length === 3 || body.length === 4) {
+    if (body.length === 4 && body[3] === '0') return null // #rgb0
     const [r, g, b] = [body[0], body[1], body[2]]
     return `#${r}${r}${g}${g}${b}${b}`
   }
   if (body.length === 6) return `#${body}`
-  if (body.length === 8) return `#${body.slice(0, 6)}` // drop alpha; we track alpha separately
+  if (body.length === 8) {
+    if (body.slice(6) === '00') return null // #rrggbb00, and so `transparent`
+    return `#${body.slice(0, 6)}` // drop alpha; we track alpha separately
+  }
   return null
 }
 
