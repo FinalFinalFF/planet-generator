@@ -209,6 +209,64 @@ localStorage persistence is per-origin, so anyone loading the page gets their
 own documents/palettes — no backend needed; say so in the README line.
 ```
 
+## Prompt 6 — Planet style: scope, locks, and the "locked planet still changes" confusion
+
+```
+Two related problems around the "Planet style" dropdown and locks. Read
+applyPlanetStyle/detectPlanetStyle in src/lib/defaults.ts and the Planet
+section of the sidebar first.
+
+PROBLEM A — Planet style is a whole-composition macro wearing a section-local
+name. Each style rewrites planet mode AND pattern/shading/accent visibility
+("Flat disc" force-hides accents; "Shaded sphere" force-shows them). That is
+the intended design, but (1) the control sits inside the Planet section and is
+labeled "Planet style", so users read it as planet-scoped, and (2) it ignores
+locks entirely — with Planet (or Accents, etc.) locked, applying a style still
+rewrites that section, violating the "a lock is absolute" product rule in
+CLAUDE.md.
+
+Fix A:
+1. Make applyPlanetStyle respect doc.locks per section: skip the planet
+   rewrite when locks.planet, skip pattern-layer changes when locks.patterns,
+   skip the shading rewrite when locks.shading, skip accents when
+   locks.accents. Apply everything else. Return enough information (or add a
+   second return value / callback) for App.tsx to toast which sections were
+   left alone, e.g. "Planet style: Flat disc (accents locked — left as is)".
+2. Rename the control to "Composition style" and add one line of helper text
+   under it: "Rewrites planet mode, shading, and layer visibility together.
+   Locked sections are left alone." Keep it in the Planet section (moving it
+   would churn the UI) but the label must stop claiming planet scope.
+3. Keep it one undo entry (it already goes through a single update()).
+4. detectPlanetStyle stays as is.
+
+PROBLEM B — With Planet locked, Remix All appears to change the planet. The
+geometry does not actually change (verify this while you're in there), but two
+things move: (1) Remix All re-rolls the palette unless COLORS is locked, and
+every planet color is a palette-slot reference, so the locked planet recolors
+head to toe; (2) the style dropdown reflects detectPlanetStyle, which reads
+pattern/shading visibility — remixing those flips the dropdown label.
+
+Fix B:
+1. Add an assertion to the temporary lock harness from the earlier remix fix
+   (or a one-off check if that's gone): remix and Remix All with locks.planet
+   set → doc.planet deep-equal before/after. If that ever fails, there is a
+   real leak — fix it; I believe it currently passes.
+2. Communicate the colors/geometry split in the UI: the lock button tooltip
+   (or the section header) for Planet/Background/Patterns/etc. should say
+   locks freeze *settings and geometry*, and that colors follow the palette
+   and the separate Colors lock. One sentence, shown where the lock lives.
+3. Add a CLAUDE.md note under the locks section: section locks freeze the
+   section's values; palette swaps still recolor locked sections because
+   colors are slot references — that is the Colors lock's job. And note that
+   applyPlanetStyle now respects locks (added in this change).
+
+Verify in the dev server: lock Accents → apply Flat disc → accent rings
+survive and a toast says accents were skipped; unlock → apply Flat disc →
+accents hide as designed. Lock Planet → the style dropdown's planet-mode
+effect is skipped but visibility changes still apply (and the toast says so).
+CHANGELOG entry for both the behavior change and the naming change.
+```
+
 ## Prompt 5 — Add a minimal regression test harness (run last)
 
 ```

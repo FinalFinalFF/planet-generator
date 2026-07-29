@@ -34,7 +34,13 @@ jobs:
       # deploy instead of shipping a broken page.
       - run: npm run build
 
+      # `enablement: true` turns Pages on if it is not already, so a fresh clone
+      # or a re-created repo deploys without a manual settings step. Without it,
+      # the very first push races repo creation and fails with "Get Pages site
+      # failed".
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
