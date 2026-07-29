@@ -3,6 +3,21 @@
 Client-side brand-graphics generator for "planet" discs: layered gradients and
 geometric patterns clipped to a circle. Vite + React + TypeScript, no backend.
 
+**Live: https://finalfinalff.github.io/planet-generator/**
+
+There is no server and no shared state. Documents, palettes and presets live in
+`localStorage`, which is per-origin and per-browser — everyone who opens the page
+gets their own, and nothing you make is visible to anyone else or to us.
+
+Pushing to `main` deploys via GitHub Actions. The workflow runs `npm run build`,
+which is `tsc -b && vite build`, so a type error fails the deploy rather than
+shipping a broken page.
+
+`Examples/`, `Palettes/` and `Frame 468.png` are reference material and are
+deliberately **not** tracked in git — they are third-party posters and brand
+boards, and this is a public repo. They are not needed to build. `Patterns/` *is*
+tracked, because the build globs it.
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173

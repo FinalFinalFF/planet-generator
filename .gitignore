@@ -3,3 +3,10 @@ dist
 .DS_Store
 *.local
 tsconfig.tsbuildinfo
+
+# Reference material — kept on disk, deliberately not tracked so a public repo
+# does not republish third-party posters and brand boards. Patterns/ IS tracked:
+# the build globs it via import.meta.glob, so the app cannot build without it.
+Examples/
+Palettes/
+Frame 468.png

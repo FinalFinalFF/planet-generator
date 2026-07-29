@@ -12,6 +12,39 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Published to GitHub Pages
+
+Live at https://finalfinalff.github.io/planet-generator/, deployed by
+`.github/workflows/deploy.yml` on every push to `main` using the official Pages
+actions (`configure-pages` → `upload-pages-artifact` → `deploy-pages`).
+
+**`base` is the literal `'/planet-generator/'`, not an env var.** A project page
+serves from a sub-path, so assets cannot be root-relative. An env-var base would
+have left `npm run dev` and `npm run preview` on `/`, which means local runs would
+never exercise the thing most likely to break — a wrong base shows up as a blank
+unstyled page, and the lazily-loaded `import.meta.glob` pattern chunks 404. Dev
+matching prod is already the rule here, so the literal wins. Vite redirects `/` →
+the base on both servers, so the CLAUDE.md QA recipe still works unchanged.
+
+Verified before pushing: built, checked the emitted `index.html` referenced
+`/planet-generator/assets/…`, served it with `npm run preview`, and screenshotted
+the base URL — the app boots fully styled with patterns applied, which is only true
+if the lazy chunks resolved. No 404s in the preview log.
+
+The deploy is **type-checked**: `npm run build` is `tsc -b && vite build`, so a type
+error fails the workflow instead of publishing a broken page.
+
+Nothing else needed changing. The app has no `fetch`, no `public/` directory and no
+root-relative URLs; patterns are bundled via `import.meta.glob` and state is
+`localStorage`. The only absolute URLs are the Google Fonts links, which a base path
+does not affect.
+
+`Examples/`, `Palettes/` and `Frame 468.png` were untracked before publishing —
+third-party posters and brand boards that a public repo would republish, and none
+of them are needed to build. They stay on disk. `Patterns/` had to remain tracked
+because the build globs it, and its art ships inside the JS bundle regardless of
+repo visibility.
+
 ### Corrected: the pattern library has 18 files, not 17
 
 Earlier entries and both docs asserted "17 files (the brief said 18)". That was
