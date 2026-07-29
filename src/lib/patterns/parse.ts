@@ -136,6 +136,45 @@ function rectIsFullBleed(el: Element, box: Box): boolean {
   return num('width') >= box.w * 0.97 && num('height') >= box.h * 0.97
 }
 
+/* ---------- sanitizing ---------- */
+
+/**
+ * Elements that can execute or render arbitrary content. `<foreignObject>` hosts
+ * full HTML, which is the interesting one — `innerHTML` will not run a `<script>`,
+ * but a `<foreignObject>` subtree is live HTML once inserted.
+ */
+const UNSAFE_TAGS = 'script, foreignObject'
+
+/**
+ * Strip anything executable or externally-referencing before a pattern's markup
+ * is inserted via `dangerouslySetInnerHTML`.
+ *
+ * Applied to built-ins and drag-and-dropped imports alike: one code path, so
+ * there is no "trusted" branch to drift, and it keeps junk out of exports too.
+ *
+ * `on*` handlers do fire from `innerHTML`-inserted nodes, so those go. `href` /
+ * `xlink:href` values are limited to same-document fragments — an external or
+ * `javascript:` target has no legitimate use in a pattern tile.
+ */
+function sanitize(root: Element): void {
+  for (const el of Array.from(root.querySelectorAll(UNSAFE_TAGS))) el.remove()
+
+  const walk = (el: Element) => {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase()
+      if (name.startsWith('on')) {
+        el.removeAttributeNode(attr)
+        continue
+      }
+      if ((name === 'href' || name === 'xlink:href') && !attr.value.trim().startsWith('#')) {
+        el.removeAttributeNode(attr)
+      }
+    }
+    for (const child of Array.from(el.children)) walk(child)
+  }
+  walk(root)
+}
+
 /* ---------- style attribute handling ---------- */
 
 function readStyleColors(style: string): Array<{ prop: string; value: string }> {
@@ -256,6 +295,10 @@ export function parsePatternSvg(id: string, name: string, raw: string): ParsedPa
   if (!root || root.tagName.toLowerCase() !== 'svg') {
     throw new Error(`${name}: not an SVG document`)
   }
+
+  // Before anything else, and for every source — this markup ends up in
+  // `dangerouslySetInnerHTML`. Covers subtrees the color walk deliberately skips.
+  sanitize(root)
 
   const vb = (root.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
   let box: Box

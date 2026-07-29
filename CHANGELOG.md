@@ -12,6 +12,32 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Hardened: pattern SVGs are sanitized before insertion
+
+Pattern markup reaches the DOM through `dangerouslySetInnerHTML`. `innerHTML` will
+not execute a `<script>`, but that is not the whole surface: `on*` handlers on
+inserted nodes do fire, and a `<foreignObject>` subtree is live HTML once
+inserted. Drag-and-drop import means arbitrary files take that path.
+
+`parsePatternSvg` now strips, before anything else: `<script>` and
+`<foreignObject>` elements, every attribute whose name begins with `on`, and
+`href` / `xlink:href` values that are not same-document fragments (so external and
+`javascript:` targets go, while `url(#…)`-style references stay).
+
+Applied to built-ins and imports through **one code path**. A "trusted" branch for
+the shipped library would only drift, and running everything through it also keeps
+junk out of exports. It runs before the color walk, so it also covers the
+`<mask>` / `<clipPath>` subtrees that walk deliberately skips.
+
+Verified with a temporary QA route (since deleted) against a deliberately hostile
+SVG — inline `<script>`, `onload` on the root, `onclick`/`onmouseover`, an
+uppercase `ONERROR`, a `<foreignObject>` containing `<img onerror>`, an external
+`href`, a `javascript:` `xlink:href`, and a legitimate `#fragment` reference. All
+the hostile parts are gone, the fragment reference and the geometry survive, and
+mounting the sanitized template the way `PlanetSvg` does executes nothing. Also
+re-parsed the whole built-in library to confirm nothing legitimate was lost: all 18
+patterns still parse, all still yield color groups, 79 source colors total.
+
 ### Fixed: fully transparent color literals parsed to opaque black
 
 `normalizeHex('transparent')` looked the keyword up in the named-color table,
