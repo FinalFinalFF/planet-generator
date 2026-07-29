@@ -588,7 +588,10 @@ export default function App() {
               batchPngSize,
               transparent,
             )
-            entries.push(await blobEntry(planetFilename(cell.seed, 'png'), png))
+            // Same long-edge suffix the single-file PNG export uses.
+            entries.push(
+              await blobEntry(planetFilename(cell.seed, 'png', `${batchPngSize}`), png),
+            )
           }
         }
         if (entries.length === 0) throw new Error('Nothing to export')

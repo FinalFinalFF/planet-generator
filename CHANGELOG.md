@@ -12,6 +12,14 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: batch PNG filenames omitted the long-edge suffix
+
+`exportBatch` named PNGs `planet-{seed}.png` while the single-file export uses
+`planet-{seed}-{longEdge}.png`. Zipping the same batch at two sizes produced files
+that could not be told apart. The batch path now appends `batchPngSize` the same
+way — `planet-batch-abc123-1-1024.png`. SVG names are unchanged; there is no size
+to record.
+
 ### Hardened: pattern SVGs are sanitized before insertion
 
 Pattern markup reaches the DOM through `dangerouslySetInnerHTML`. `innerHTML` will
