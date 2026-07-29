@@ -338,8 +338,10 @@ export function Sidebar(props: SidebarProps) {
         lock={lockFor('planet')}
         randomize={diceFor('planet', 'the planet')}
       >
+        {/* Deliberately not called "Planet style": it reaches outside this
+            section. It lives here because that is where it is looked for. */}
         <Select
-          label="Planet style"
+          label="Composition style"
           value={detectPlanetStyle(doc)}
           options={[
             ...PLANET_STYLES.map((s) => ({ value: s, label: PLANET_STYLE_LABELS[s] })),
@@ -351,8 +353,8 @@ export function Sidebar(props: SidebarProps) {
           }}
         />
         <div className="note">
-          A style rewrites the planet mode, the shading and which layers are visible
-          together — the reference looks are combinations, not single settings.
+          Rewrites planet mode, shading, and layer visibility together. Locked sections are
+          left alone.
         </div>
         <Check
           label="Visible"

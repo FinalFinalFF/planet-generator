@@ -218,10 +218,30 @@ passing vacuously.
 
 **A lock is absolute** — this is a stated product rule, not an implementation
 detail. Nothing writes to a locked section: not Remix, not Remix All, not
-`shuffleColors`, not that section's own dice. Every exported entry point in
-`remix.ts` early-returns on `doc.locks`, so a caller that forgets to check still
-cannot break the rule; the UI additionally disables controls a lock has made
-inert. Keep both halves when adding a new randomizer.
+`shuffleColors`, not that section's own dice, and **not `applyPlanetStyle`** (which
+respects the locks per section and reports which ones it skipped, so the UI can say
+so). Every exported entry point in `remix.ts` early-returns on `doc.locks`, so a
+caller that forgets to check still cannot break the rule; the UI additionally
+disables controls a lock has made inert. Keep both halves when adding a new
+randomizer *or a new macro*.
+
+**What a lock does and does not freeze.** A section lock freezes that section's
+**values** — settings and geometry. It does **not** pin the section's rendered
+colors, because every color is a palette-slot reference (`ColorRef`), so swapping
+the palette recolors locked sections too. That is the **Colors lock's** job, and it
+is why "Remix All with Planet locked" looks like it changed the planet: the geometry
+is byte-identical, but Remix All re-rolled the palette. Two consequences worth
+keeping in mind:
+
+- Do not "fix" this by having section locks capture literal hexes. Slot indirection
+  is the whole point of the color system; freezing hexes would break palette
+  switching for the locked section forever.
+- The `detectPlanetStyle` dropdown reads pattern/shading *visibility*, so remixing
+  those flips the Composition style label even when the planet is locked. That is
+  the label reporting the composition honestly, not a leak.
+
+The lock chip's tooltip states the settings-vs-colors split (`lockTitle` in
+`Section.tsx`); keep it accurate if the semantics ever change.
 
 `remixSection()` randomizes one section by *inverting* the locks, so there is one
 code path deciding what a section's randomization means. It leaves `doc.seed`

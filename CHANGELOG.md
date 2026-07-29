@@ -12,6 +12,62 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: "Planet style" → "Composition style", and it now respects locks
+
+Two related problems with the same control.
+
+**It ignored the locks.** Each style rewrites planet mode *and* pattern / shading /
+accent visibility — that is the intended design, the reference looks are
+combinations rather than single settings. But it rewrote them unconditionally, so
+applying a style over a locked section overwrote it. That contradicts "a lock is
+absolute", which had been written down as a product rule and enforced everywhere in
+`remix.ts` — the rule just had a hole where macros were concerned.
+
+`applyPlanetStyle` now gates per section: `locks.planet` skips the mode rewrite,
+`locks.patterns` skips the pattern-layer changes, `locks.shading` skips the shading
+rewrite, `locks.accents` skips accents. Everything unlocked still applies. It
+returns `{ doc, skipped }` so the toast can say what it left alone — "Composition
+style: Flat disc (accents locked — left as is)". Still one `update()` call, so still
+one undo entry.
+
+Restructured into a `StylePlan` per style plus one lock-gated application, rather
+than five copies of the gating. That also **fixed two latent bugs** in the old
+rebuild, which threw the layer array away and reassembled it as
+`[patterns, shading, accents]`:
+
+- an accent layer deliberately placed *below* the patterns got silently restacked
+  to the top;
+- `find()` meant a *duplicated* shading or accent layer (the Duplicate button makes
+  these) was dropped entirely.
+
+Mapping layers in place preserves order and duplicates.
+
+**It was misnamed.** Sitting in the Planet section and labelled "Planet style", it
+read as planet-scoped while reaching across the whole composition. Renamed to
+**Composition style**, with helper text: "Rewrites planet mode, shading, and layer
+visibility together. Locked sections are left alone." Left in the Planet section —
+that is where people look for it, and moving it would churn the UI for no gain.
+`detectPlanetStyle` is unchanged.
+
+### Clarified: what a section lock actually freezes
+
+"Remix All with Planet locked changes the planet" is a reasonable reading of what
+you see, and the geometry is in fact untouched — asserted, not assumed. Two other
+things move:
+
+- **Remix All re-rolls the palette** unless Colors is locked, and every planet color
+  is a palette-slot reference, so a locked planet recolors head to toe. Working as
+  designed; slot indirection is the point of the color system.
+- **The style dropdown label** comes from `detectPlanetStyle`, which reads pattern
+  and shading visibility — so remixing those flips the label even with the planet
+  locked.
+
+No behavior change. The lock chip's tooltip now states the split where the lock
+lives: locked freezes settings and geometry, colors still follow the palette, use
+the Palette lock for those. The Palette lock gets its own wording. CLAUDE.md records
+the semantics, why capturing literal hexes would be the wrong fix, and that
+`applyPlanetStyle` now honours locks.
+
 ### Published to GitHub Pages
 
 Live at https://finalfinalff.github.io/planet-generator/, deployed by

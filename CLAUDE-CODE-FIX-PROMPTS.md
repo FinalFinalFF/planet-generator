@@ -267,6 +267,58 @@ effect is skipped but visibility changes still apply (and the toast says so).
 CHANGELOG entry for both the behavior change and the naming change.
 ```
 
+## Prompt 7 — Remix must preserve layer stack order for locked sections
+
+```
+Bug: remix() in src/lib/remix.ts rebuilds doc.layers in a canonical order every
+time — [accents-if-below] + patterns + shading + [accents-if-above]. The
+section locks preserve layer CONTENTS (prevPatterns / prevShading /
+prevAccents pass through untouched) but the rebuild discards their POSITIONS.
+So a user-arranged stack (shading between two patterns, an accent mid-stack)
+is flattened by every Remix, even when the relevant sections are locked. The
+existing locks.accents special case (accentsWereBelow) only preserves a binary
+above/below-the-patterns position, not the actual slot.
+
+The rule to implement: a locked section's layers keep their exact positions in
+doc.layers. Positions may only change for unlocked sections. Concretely,
+replace the rebuild with in-place substitution:
+
+1. Start from doc.layers' existing order. Substitute remixed shading/accents
+   into the same indices they already occupy. Substitute remixed pattern
+   layers into the existing pattern slots in order.
+2. Pattern count changes (only possible when locks.patterns is off): if the
+   new count is larger, insert the extra layers immediately after the last
+   existing pattern slot (or, if there were none, below the shading layer, or
+   at the end); if smaller, drop the trailing pattern slots.
+3. The accent above/below roll (rolledBelow) stays, and per the lock/RNG
+   invariant it must still be DRAWN unconditionally — but it may only MOVE the
+   accent layer when locks.accents is off. When it moves, move just the accent
+   layer to the bottom or the top of the stack and leave every other layer's
+   relative order alone.
+4. Shading no longer gets forcibly re-seated after patterns; it keeps its slot.
+   (If a doc has shading below a pattern, that was a user choice; remix
+   changing its contents is fine, moving it is not.)
+
+Interactions to keep intact:
+- remixSection() inverts locks and reuses remix(), so it inherits this fix —
+  verify that randomizing one section never reorders the others.
+- The RNG-draw ordering fixed earlier must not regress: this change is about
+  where results are PLACED, not how many draws happen.
+- normalizeDoc/presets: no schema change, order is already part of doc.layers.
+
+Extend the determinism harness/tests: with all of patterns+shading+accents
+locked, remix() must return doc.layers deep-equal INCLUDING order; with only
+patterns locked, pattern layers keep contents and their relative order among
+themselves. Sabotage once to confirm the check bites.
+
+Verify visually in the dev server: build a stack with an accent between two
+patterns, lock accents and patterns, hit Remix and Remix All several times —
+the Layers list order must not move. Unlock accents, confirm the above/below
+restack still happens occasionally. CHANGELOG entry: locks now freeze stack
+position as well as contents, and why the accent roll survives as a
+move-only-when-unlocked selection.
+```
+
 ## Prompt 5 — Add a minimal regression test harness (run last)
 
 ```

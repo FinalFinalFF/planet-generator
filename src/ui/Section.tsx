@@ -20,6 +20,24 @@ function RandomizeIcon() {
   )
 }
 
+/**
+ * A section lock freezes that section's *values*. Colors are palette-slot
+ * references, so swapping the palette still recolors a locked section — that is
+ * what the Palette (colors) lock is for. Saying so on the control itself is the
+ * only place a user will look when a locked planet visibly changes color.
+ */
+function lockTitle(section: LockSection, on: boolean): string {
+  if (section === 'colors') {
+    return on
+      ? 'Locked — the palette and every color assignment are frozen.'
+      : 'Unlocked — Remix All may switch palette, and Shuffle colors may re-deal slots.'
+  }
+  return on
+    ? 'Locked — settings and geometry here are frozen, including for Remix and ' +
+        'Composition style. Colors still follow the palette; freeze those with the Palette lock.'
+    : 'Unlocked — Remix and Composition style may change this section.'
+}
+
 export function Section({
   num,
   title,
@@ -83,7 +101,7 @@ export function Section({
             role="button"
             tabIndex={0}
             className={`lock${lock.on ? ' lock--on' : ''}`}
-            title={lock.on ? 'Locked — Remix will not touch this' : 'Unlocked — Remix may change this'}
+            title={lockTitle(lock.section, lock.on)}
             aria-label={`${lock.on ? 'Unlock' : 'Lock'} ${title} for remix`}
             aria-pressed={lock.on}
             onClick={(e) => {

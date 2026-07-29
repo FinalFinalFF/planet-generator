@@ -6,8 +6,10 @@ import {
   type Gradient,
   type Layer,
   type LayerMask,
+  type LockSection,
   type MaskMode,
   type PatternLayer,
+  type Planet,
   type PlanetDoc,
   type PlanetStyle,
   type ShadingLayer,
@@ -338,73 +340,67 @@ export function normalizeDoc(doc: PlanetDoc): PlanetDoc {
  * together — the reference looks are combinations of all three, not one setting.
  * Palette, canvas, seed, locks and pattern choices are left alone.
  */
-export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetDoc {
-  const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
-  const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-  const accents = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
+/**
+ * What a style wants to do, before locks get a say. Split out from the
+ * application so each style stays readable as a recipe while the lock gating
+ * lives in exactly one place.
+ */
+type StylePlan = {
+  planet: (prev: Planet) => Planet
+  pattern: (prev: PatternLayer, index: number) => PatternLayer
+  shading: Partial<ShadingLayer>
+  accentsVisible: boolean
+}
 
-  const withShading = (patch: Partial<ShadingLayer>): ShadingLayer =>
-    shading ? { ...shading, ...patch } : makeShadingLayer(patch)
-
-  const rebuild = (next: Layer[]): PlanetDoc['layers'] => next
-
+function planFor(style: PlanetStyle): StylePlan {
   switch (style) {
     case 'flat-disc':
       // The plain gradient circles of the reference: no shading at all, so the
       // disc stays graphic rather than photographic.
       return {
-        ...doc,
-        planet: { ...doc.planet, mode: 'disc' },
-        layers: rebuild([
-          ...patterns.map((p) => ({ ...p, visible: false })),
-          withShading({ visible: false }),
-          ...(accents ? [{ ...accents, visible: false }] : []),
-        ]),
+        planet: (p) => ({ ...p, mode: 'disc' }),
+        pattern: (p) => ({ ...p, visible: false }),
+        shading: { visible: false },
+        accentsVisible: false,
       }
 
     case 'shaded-sphere':
       return {
-        ...doc,
-        planet: { ...doc.planet, mode: 'disc' },
-        layers: rebuild([
-          ...patterns.map((p) => ({ ...p, visible: false })),
-          withShading({
-            visible: true,
-            shadow: 0.86,
-            highlight: 0.36,
-            lightDistance: 0.5,
-            highlightSize: 0.7,
-            contactShadow: 0.58,
-            opacity: 1,
-            blend: 'normal',
-          }),
-          ...(accents ? [{ ...accents, visible: true }] : []),
-        ]),
+        planet: (p) => ({ ...p, mode: 'disc' }),
+        pattern: (p) => ({ ...p, visible: false }),
+        shading: {
+          visible: true,
+          shadow: 0.86,
+          highlight: 0.36,
+          lightDistance: 0.5,
+          highlightSize: 0.7,
+          contactShadow: 0.58,
+          opacity: 1,
+          blend: 'normal',
+        },
+        accentsVisible: true,
       }
 
     case 'patterned-disc':
       // Crisp ink across the whole disc, shading pulled back so the pattern
       // stays legible edge to edge.
       return {
-        ...doc,
-        planet: { ...doc.planet, mode: 'disc' },
-        layers: rebuild([
-          ...patterns.map((p, i) => ({
-            ...p,
-            visible: true,
-            blend: (i === 0 ? 'normal' : p.blend) as BlendMode,
-            opacity: i === 0 ? 0.72 : p.opacity,
-            mask: { ...p.mask, mode: 'planet' as const },
-          })),
-          withShading({
-            visible: true,
-            shadow: 0.4,
-            highlight: 0.16,
-            contactShadow: 0.3,
-            highlightSize: 0.9,
-          }),
-          ...(accents ? [{ ...accents, visible: true }] : []),
-        ]),
+        planet: (p) => ({ ...p, mode: 'disc' }),
+        pattern: (p, i) => ({
+          ...p,
+          visible: true,
+          blend: (i === 0 ? 'normal' : p.blend) as BlendMode,
+          opacity: i === 0 ? 0.72 : p.opacity,
+          mask: { ...p.mask, mode: 'planet' as const },
+        }),
+        shading: {
+          visible: true,
+          shadow: 0.4,
+          highlight: 0.16,
+          contactShadow: 0.3,
+          highlightSize: 0.9,
+        },
+        accentsVisible: true,
       }
 
     case 'overlap-bloom':
@@ -412,43 +408,90 @@ export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetDoc 
       // lens so textures meet in lens-shaped patches instead of covering
       // the whole disc.
       return {
-        ...doc,
-        planet: { ...doc.planet, mode: 'disc' },
-        layers: rebuild([
-          ...patterns.map((p, i) => ({
-            ...p,
-            visible: true,
-            blend: (i % 2 === 0 ? 'multiply' : 'screen') as BlendMode,
-            opacity: 0.5,
-            mask: {
-              mode: (i % 2 === 0 ? 'lens' : 'outside-lens') as MaskMode,
-              cx: i % 2 === 0 ? 0.3 : -0.26,
-              cy: i % 2 === 0 ? 0.26 : -0.22,
-              radius: 0.9,
-              feather: 0.55,
-            },
-          })),
-          withShading({ visible: true, shadow: 0.62, highlight: 0.28, contactShadow: 0.42 }),
-          ...(accents ? [{ ...accents, visible: true }] : []),
-        ]),
+        planet: (p) => ({ ...p, mode: 'disc' }),
+        pattern: (p, i) => ({
+          ...p,
+          visible: true,
+          blend: (i % 2 === 0 ? 'multiply' : 'screen') as BlendMode,
+          opacity: 0.5,
+          mask: {
+            mode: (i % 2 === 0 ? 'lens' : 'outside-lens') as MaskMode,
+            cx: i % 2 === 0 ? 0.3 : -0.26,
+            cy: i % 2 === 0 ? 0.26 : -0.22,
+            radius: 0.9,
+            feather: 0.55,
+          },
+        }),
+        shading: { visible: true, shadow: 0.62, highlight: 0.28, contactShadow: 0.42 },
+        accentsVisible: true,
       }
 
     case 'sliced-sweep':
       // Patterns and the terminator both fight the slice lattice, so the
       // slices carry the whole planet and only the accents stay.
       return {
-        ...doc,
-        planet: {
-          ...doc.planet,
-          mode: 'sliced',
-          slices: { ...DEFAULT_SLICES, ...doc.planet.slices },
-        },
-        layers: rebuild([
-          ...patterns.map((p) => ({ ...p, visible: false })),
-          withShading({ visible: false }),
-          ...(accents ? [{ ...accents, visible: true }] : []),
-        ]),
+        planet: (p) => ({ ...p, mode: 'sliced', slices: { ...DEFAULT_SLICES, ...p.slices } }),
+        pattern: (p) => ({ ...p, visible: false }),
+        shading: { visible: false },
+        accentsVisible: true,
       }
+  }
+}
+
+export type PlanetStyleResult = {
+  doc: PlanetDoc
+  /** Sections a lock kept the style from touching, for the caller to report. */
+  skipped: LockSection[]
+}
+
+/**
+ * Apply a composition style, **respecting the locks**. A lock is absolute
+ * (CLAUDE.md), and that has to hold for macros too — not just Remix.
+ *
+ * Layers are mapped in place rather than rebuilt, so the existing stack order
+ * survives. That matters for a locked accent layer sitting *below* the patterns,
+ * which the old rebuild silently restacked, and it also stops a duplicated
+ * shading or accent layer being dropped.
+ */
+export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetStyleResult {
+  const plan = planFor(style)
+  const { locks } = doc
+
+  const hasPattern = doc.layers.some((l) => l.kind === 'pattern')
+  const hasShading = doc.layers.some((l) => l.kind === 'shading')
+  const hasAccent = doc.layers.some((l) => l.kind === 'accent')
+
+  const skipped: LockSection[] = []
+  if (locks.planet) skipped.push('planet')
+  if (locks.patterns && hasPattern) skipped.push('patterns')
+  if (locks.shading) skipped.push('shading')
+  if (locks.accents && hasAccent) skipped.push('accents')
+
+  let patternIndex = 0
+  const layers: Layer[] = doc.layers.map((layer) => {
+    if (layer.kind === 'pattern') {
+      const i = patternIndex++
+      return locks.patterns ? layer : plan.pattern(layer, i)
+    }
+    if (layer.kind === 'shading') {
+      return locks.shading ? layer : { ...layer, ...plan.shading }
+    }
+    return locks.accents ? layer : { ...layer, visible: plan.accentsVisible }
+  })
+
+  // Every style specifies shading, so a document without one gets it created —
+  // placed above the patterns and below any accents, matching where the styles
+  // have always put it.
+  if (!hasShading && !locks.shading) {
+    const firstAccent = layers.findIndex((l) => l.kind === 'accent')
+    const made = makeShadingLayer(plan.shading)
+    if (firstAccent >= 0) layers.splice(firstAccent, 0, made)
+    else layers.push(made)
+  }
+
+  return {
+    doc: { ...doc, planet: locks.planet ? doc.planet : plan.planet(doc.planet), layers },
+    skipped,
   }
 }
 

@@ -324,8 +324,20 @@ export default function App() {
 
   const onApplyPlanetStyle = useCallback(
     (style: PlanetStyle) => {
-      rawUpdate((d) => applyPlanetStyle(d, style))
-      notify(`Planet style: ${PLANET_STYLE_LABELS[style]}`)
+      // One update() call, so the whole macro stays a single undo entry. The
+      // skipped list is read off the same computation the updater applies.
+      let skipped: LockSection[] = []
+      rawUpdate((d) => {
+        const result = applyPlanetStyle(d, style)
+        skipped = result.skipped
+        return result.doc
+      })
+      const label = PLANET_STYLE_LABELS[style]
+      notify(
+        skipped.length > 0
+          ? `Composition style: ${label} (${skipped.join(', ')} locked — left as is)`
+          : `Composition style: ${label}`,
+      )
     },
     [rawUpdate, notify],
   )
