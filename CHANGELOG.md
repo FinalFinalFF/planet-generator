@@ -12,6 +12,54 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: Remix flattened a user-arranged layer stack, even with sections locked
+
+`remix()` rebuilt `doc.layers` in a canonical order every time —
+`[accents-if-below] + patterns + shading + [accents-if-above]`. The section locks
+preserved layer *contents* (`prevPatterns` / `prevShading` / `prevAccents` passed
+through untouched) but the rebuild discarded their *positions*. So an arrangement
+someone had made deliberately — shading between two patterns, an accent mid-stack,
+shading below everything — was flattened by every Remix even with those sections
+locked.
+
+The earlier `accentsWereBelow` special case only preserved a binary
+above/below-the-patterns position, not the actual slot, so it papered over one case
+of a general bug.
+
+**The rule now implemented: a locked section's layers keep their exact positions.**
+Positions may only change for unlocked sections. The rebuild is replaced with
+in-place substitution:
+
+- remixed shading / accents go back into the slots they already occupied (and only
+  the *first* of each is remixed, so duplicates pass through untouched instead of
+  being dropped by `find()`);
+- remixed pattern layers fill the existing pattern slots in order;
+- a longer pattern run puts the surplus straight after the last existing pattern
+  slot, else below the shading layer, else at the end; a shorter one drops the
+  trailing slots;
+- the accent above/below roll is still **drawn unconditionally** — the RNG
+  invariant is about how many draws happen, not where results land — but it may
+  only *move* the accent when accents are unlocked, and it moves that one layer to
+  the bottom or top without disturbing anything else;
+- shading is no longer force-seated after the patterns. If a document has shading
+  below a pattern that was a choice; remixing its contents is fine, moving it is
+  not.
+
+Verified with a temporary harness (42 assertions, since deleted) on a deliberately
+non-canonical fixture (`pattern > accent > pattern > shading`): with
+patterns+shading+accents locked, `layers` is deep-equal *including order* across
+seeds; with only patterns locked the pattern run keeps contents and relative order;
+a locked mid-stack accent never lands on an edge; an unlocked accent still lands at
+bottom or top and both occur across seeds; shading placed at index 0 stays there;
+`remixSection` never reorders the sections it is not randomizing; pattern counts
+still vary 1–3 with exactly one shading and one accent surviving; and the earlier
+RNG invariant still holds. **Sabotaged** by reinstating the canonical rebuild — 24
+assertions failed, so the checks bite.
+
+The doc-level assertions stand in for the suggested click-through in the dev server,
+which needs interaction this environment cannot drive; they cover more seeds than
+hitting Remix by hand would.
+
 ### Changed: "Planet style" → "Composition style", and it now respects locks
 
 Two related problems with the same control.

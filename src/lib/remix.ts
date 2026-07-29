@@ -440,22 +440,67 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
   const shading = locks.shading ? (prevShading ?? null) : shadingCandidate
   const accents = locks.accents ? (prevAccents ?? null) : accentsCandidate
 
-  // Stack order: patterns, then shading, with accents free to sit above or below.
-  // The roll happens either way to keep the RNG stream fixed, but a locked
-  // accent layer keeps whichever side of the patterns it was already on —
-  // otherwise a patterns-only remix would silently restack it.
+  /*
+   * --- stack order ---
+   *
+   * A locked section's layers keep their **exact positions**, not just their
+   * contents. Positions may only move for unlocked sections. So this substitutes
+   * remixed layers into the slots they already occupy rather than rebuilding the
+   * array in a canonical order — the old rebuild flattened any arrangement a user
+   * had made (shading between two patterns, an accent mid-stack) on every Remix,
+   * even with those sections locked.
+   *
+   * The accent above/below roll is still drawn unconditionally, per the RNG
+   * invariant; it may only *move* the accent when accents are unlocked.
+   */
   const rolledBelow = rng.bool(0.3)
-  const prevAccentAt = doc.layers.findIndex((l) => l.kind === 'accent')
-  const prevPatternAt = doc.layers.findIndex((l) => l.kind === 'pattern')
-  const accentsWereBelow =
-    prevAccentAt >= 0 && prevPatternAt >= 0 && prevAccentAt < prevPatternAt
-  const accentsBelow = locks.accents ? accentsWereBelow : rolledBelow
 
-  const layers: Layer[] = []
-  if (accents && accentsBelow) layers.push(accents)
-  layers.push(...patterns)
-  if (shading) layers.push(shading)
-  if (accents && !accentsBelow) layers.push(accents)
+  let patternSlot = 0
+  let shadingPlaced = false
+  let accentPlaced = false
+  // A null marks a pattern slot the new, shorter run no longer fills.
+  const substituted: (Layer | null)[] = doc.layers.map((layer) => {
+    if (layer.kind === 'pattern') return patterns[patternSlot++] ?? null
+    if (layer.kind === 'shading') {
+      // Only the first shading layer was remixed; any duplicates pass through.
+      if (shadingPlaced || !shading) return layer
+      shadingPlaced = true
+      return shading
+    }
+    if (accentPlaced || !accents) return layer
+    accentPlaced = true
+    return accents
+  })
+  const layers: Layer[] = substituted.filter((l): l is Layer => l !== null)
+
+  // A longer pattern run needs somewhere to put the surplus: straight after the
+  // last existing pattern slot, else below the shading layer, else at the end.
+  const surplus = patterns.slice(patternSlot)
+  if (surplus.length > 0) {
+    let at = -1
+    for (let i = layers.length - 1; i >= 0; i--) {
+      if (layers[i].kind === 'pattern') {
+        at = i + 1
+        break
+      }
+    }
+    if (at < 0) {
+      const shadingAt = layers.findIndex((l) => l.kind === 'shading')
+      at = shadingAt >= 0 ? shadingAt : layers.length
+    }
+    layers.splice(at, 0, ...surplus)
+  }
+
+  // Move only the accent layer, only when unlocked, leaving every other layer's
+  // relative order alone.
+  if (!locks.accents) {
+    const at = layers.findIndex((l) => l.kind === 'accent')
+    if (at >= 0) {
+      const [moved] = layers.splice(at, 1)
+      if (rolledBelow) layers.unshift(moved)
+      else layers.push(moved)
+    }
+  }
 
   return { ...doc, seed, background, planet, layers }
 }
