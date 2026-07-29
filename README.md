@@ -66,8 +66,8 @@ budget stays in memory for the session and says so.
 ## Pattern pipeline
 
 `Patterns/` at the repo root is the source of truth — the duplicate SVGs sitting
-next to it in the root folder are deliberately not globbed. There are **17**
-files (the brief said 18).
+next to it in the root folder are deliberately not globbed. There are **18**
+files.
 
 Each file is fetched lazily (`import.meta.glob` + `?raw`, one chunk per pattern),
 then at load time `src/lib/patterns/parse.ts`:

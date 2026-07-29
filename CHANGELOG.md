@@ -12,6 +12,14 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Corrected: the pattern library has 18 files, not 17
+
+Earlier entries and both docs asserted "17 files (the brief said 18)". That was
+wrong — a miscount on first inspection, stated confidently and then propagated into
+README, CLAUDE.md and this file, complete with an aside that the brief was
+mistaken. `Patterns/` has always held 18 SVGs, all 18 tracked and all 18 parsing.
+Corrected everywhere. The brief was right.
+
 ### Fixed: batch PNG filenames omitted the long-edge suffix
 
 `exportBatch` named PNGs `planet-{seed}.png` while the single-file export uses
@@ -425,7 +433,7 @@ Initial build (`147f6f9`, tagged `v1.0.0`). 70 files, 14,938 insertions.
 ### Pattern pipeline
 
 `Patterns/` is the source of truth; the duplicate SVGs loose in the root folder
-are deliberately not globbed. **There are 17 files, not the 18 the brief stated.**
+are deliberately not globbed. There are **18** files.
 
 Each file becomes a recolourable template: colour literals become `%%cN%%`
 tokens, unique colours cluster in OKLab into ≤8 assignable groups, ids are

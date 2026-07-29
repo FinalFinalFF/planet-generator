@@ -42,7 +42,7 @@ For anything touching rendering, remix, or the pattern pipeline, add a temporary
 QA route (an extra `qa.html` + `src/qa.tsx` entry; Vite picks up new HTML entries
 automatically) that renders a grid of variants, screenshot it once, then **delete
 the route before finishing**. Useful modes: an N-up remix grid across seeds and
-palettes, a contact sheet of all 17 patterns, and a
+palettes, a contact sheet of all 18 patterns, and a
 live-preview / exported-SVG / rasterized-PNG triptych for export parity.
 
 ## Architecture
@@ -126,8 +126,8 @@ adding a style, add it to `PLANET_STYLES` and `PLANET_STYLE_LABELS` in
 `src/lib/patterns/` — `source.ts` → `parse.ts` → `registry.ts`.
 
 `Patterns/` at the repo root is the source of truth. Duplicate SVGs sit loose in
-the root folder and are **deliberately not globbed**. There are **17** files (the
-original brief said 18). `source.ts` globs them with `import.meta.glob(…, {query:
+the root folder and are **deliberately not globbed**. There are **18** files.
+`source.ts` globs them with `import.meta.glob(…, {query:
 '?raw'})` lazily, so each is its own bundle chunk.
 
 `parse.ts` converts raw SVG into a `ParsedPattern`: a `template` string where

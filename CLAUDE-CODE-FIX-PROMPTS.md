@@ -164,6 +164,51 @@ CHANGELOG entry per item:
 npm run typecheck when done. No behavior beyond the above.
 ```
 
+## Prompt 5b — Deploy to GitHub Pages (run anytime; fine before Prompt 5)
+
+```
+Publish this app as a live webpage on GitHub Pages. Current state: git repo is
+initialized with a sane .gitignore (node_modules, dist ignored) but has NO
+remote; vite.config.ts sets no `base`.
+
+1. Create the GitHub repo and push. Use the `gh` CLI (`gh repo create`) — ask
+   me for the repo name and whether public or private before creating, and
+   stop and tell me if `gh` is missing or not authenticated rather than
+   guessing at credentials. NOTE for me, the user: the Patterns/, Examples/,
+   and Palettes/ folders contain stock/brand assets that a public repo would
+   republish; private repos need a paid GitHub plan for Pages. Surface that
+   tradeoff in the question.
+
+2. Configure Vite for a project page. In vite.config.ts set
+   `base: process.env.GHPAGES_BASE ?? '/'` or simply `'/<repo-name>/'` —
+   pick the simple literal unless there's a reason not to. Everything in the
+   app uses bundled imports (import.meta.glob for patterns) and localStorage,
+   so a base path is the only serving-related change; verify no absolute `/`
+   asset URLs exist in index.html or src (check favicon/links).
+
+3. Add .github/workflows/deploy.yml using the official Pages actions:
+   on push to the default branch → npm ci → npm run build (this runs
+   `tsc -b && vite build`, so type errors fail the deploy — good) →
+   actions/upload-pages-artifact with dist → actions/deploy-pages. Set the
+   workflow permissions (pages: write, id-token: write) and enable Pages
+   with source "GitHub Actions" via `gh api` or tell me the one settings
+   toggle if the API path is awkward.
+
+4. Verify locally before pushing: `npm run build`, then `npm run preview`,
+   and screenshot the preview URL with the headless-Chrome command from
+   CLAUDE.md to confirm the app boots with the non-root base (asset 404s
+   from a wrong base show up as a blank/unstyled page). After pushing, watch
+   the Actions run with `gh run watch`, then fetch the live URL and confirm
+   it renders and that Remix + SVG export work (export is all client-side,
+   so it should).
+
+5. Housekeeping: add the live URL to the README, and a CHANGELOG entry noting
+   the base-path decision and that deploys are type-checked by the build.
+
+localStorage persistence is per-origin, so anyone loading the page gets their
+own documents/palettes — no backend needed; say so in the README line.
+```
+
 ## Prompt 5 — Add a minimal regression test harness (run last)
 
 ```
