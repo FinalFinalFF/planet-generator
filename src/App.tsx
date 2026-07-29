@@ -190,19 +190,34 @@ export default function App() {
   }, [doc.layers, parsedById, ingest])
 
   /* ---- persistence of UI prefs ---- */
+  const pendingUi = useRef<storage.UiState | null>(null)
   useEffect(() => {
-    const t = setTimeout(
-      () =>
-        storage.saveUi({
-          zoom: ui.zoom,
-          fitToStage: ui.fitToStage,
-          openSections: SECTION_KEYS.filter((k) => open[k]),
-          selectedLayerId: ui.selectedLayerId,
-        }),
-      300,
-    )
+    const snapshot: storage.UiState = {
+      zoom: ui.zoom,
+      fitToStage: ui.fitToStage,
+      openSections: SECTION_KEYS.filter((k) => open[k]),
+      selectedLayerId: ui.selectedLayerId,
+    }
+    pendingUi.current = snapshot
+    const t = setTimeout(() => storage.saveUi(snapshot), 300)
     return () => clearTimeout(t)
   }, [ui, open])
+
+  // Same flush-on-exit as the document; see the note in useDoc.
+  useEffect(() => {
+    const flush = () => {
+      if (pendingUi.current) storage.saveUi(pendingUi.current)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   useEffect(() => storage.savePalettes(palettes), [palettes])
   useEffect(() => storage.savePresets(presets), [presets])

@@ -6,6 +6,7 @@ import { saveDoc } from '../lib/storage'
 
 const HISTORY_LIMIT = 80
 const COALESCE_MS = 700
+const SAVE_DEBOUNCE_MS = 350
 
 type History = {
   past: PlanetDoc[]
@@ -117,10 +118,33 @@ export function useDoc(initial: PlanetDoc): DocApi {
   }, [])
 
   // Persist, but not on every slider frame.
+  const pending = useRef(history.present)
   useEffect(() => {
-    const t = setTimeout(() => saveDoc(history.present), 350)
+    pending.current = history.present
+    const t = setTimeout(() => saveDoc(pending.current), SAVE_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [history.present])
+
+  /*
+   * Flush on the way out. Closing the tab inside the debounce window would
+   * otherwise drop the last change. `pagehide` is the reliable teardown hook —
+   * `beforeunload` is skipped when a page comes from the back/forward cache, and
+   * `unload` is unreliable on mobile — with `visibilitychange` covering the case
+   * where a tab is backgrounded and then discarded without ever firing pagehide.
+   * localStorage writes are synchronous, so a flush here completes.
+   */
+  useEffect(() => {
+    const flush = () => saveDoc(pending.current)
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   return useMemo(
     () => ({

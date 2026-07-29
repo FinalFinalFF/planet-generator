@@ -12,6 +12,27 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: closing the tab inside the save debounce lost the last change
+
+`useDoc` debounces `saveDoc` by 350 ms and `App` debounces UI state by 300 ms.
+Closing or discarding the tab inside that window dropped whatever had just
+changed.
+
+Both now also flush on the way out, on `pagehide` and on `visibilitychange` →
+`hidden`. `pagehide` rather than `beforeunload` because the latter is skipped when
+a page enters the back/forward cache, and `unload` is unreliable on mobile;
+`visibilitychange` covers a tab being backgrounded and then discarded without
+pagehide ever firing. localStorage writes are synchronous, so a flush from those
+handlers completes. The debounce is unchanged for the steady state — the listener
+is purely a flush.
+
+The pending value is held in a ref written from the same effect that schedules the
+debounce, not during render.
+
+Verified with a temporary QA route (since deleted): commit a change, assert nothing
+is persisted yet, dispatch `pagehide`, assert the change is now in storage; repeat
+for `visibilitychange`; and confirm the ordinary debounce still saves on its own.
+
 ### Fixed: undo history behaved differently in dev than in production
 
 `useDoc`'s `replace()` and `update()` mutated `lastCommit.current` **inside** the
