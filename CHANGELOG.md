@@ -51,6 +51,19 @@ from `nextId()`, a `Date.now()` + counter, not the RNG. Making them seed-derived
 considered and rejected earlier — they are React keys nothing reads, and generated
 ids could collide with ids retained by locked sections.
 
+Four further tests assert **id uniqueness** — no duplicate layer or gradient-stop
+ids after a remix, after chained remixes, and after every single-lock combination
+remixed twice (the risky case: a locked section carries its old ids forward while
+fresh ones are minted beside them). Determinism itself is checked on id-normalized
+output, so it is blind to duplicates, and a duplicate is exactly what made two
+layers on one pattern share a set of colors earlier in this project. Layer ids also
+become element ids in the exported SVG, so uniqueness is a real requirement rather
+than bookkeeping. Sabotaging `nextId()` to return a constant fails all three
+duplicate checks.
+
+Correction to an earlier note here: gradient-stop ids are React keys only, but
+*layer* ids are not — they are interpolated into exported SVG element ids.
+
 **Verified by sabotage**, one contract at a time: a lock-conditional RNG draw in
 `remix()` → 1 failure; removing `mask` from `SKIP_TAGS` in `parse.ts` → 2 failures;
 an off-by-one CRC in `zip.ts` → 2 failures. All restored, all 26 green after.

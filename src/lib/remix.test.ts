@@ -161,6 +161,55 @@ describe('a lock is absolute', () => {
   })
 })
 
+/*
+ * Determinism above is checked on id-normalized output, which means it cannot see
+ * *duplicate* ids. That gap is worth closing explicitly: layer ids become element
+ * ids in the exported SVG, and a collision is what caused two layers on the same
+ * pattern to paint with one set of colors (see CHANGELOG). The risky case is a
+ * repeat remix, where a locked section keeps its old ids while new ones are minted.
+ */
+describe('ids stay unique', () => {
+  const duplicates = (values: string[]) => {
+    const seen = new Set<string>()
+    return [...new Set(values.filter((v) => seen.has(v) || (seen.add(v), false)))]
+  }
+  const allIds = (d: PlanetDoc) => [
+    ...d.layers.map((l) => l.id),
+    ...d.background.gradient.stops.map((s) => s.id),
+    ...d.planet.gradient.stops.map((s) => s.id),
+  ]
+
+  it('has no duplicate ids after a single remix', () => {
+    for (const seed of ['i1', 'i2', 'i3', 'i4']) {
+      expect(duplicates(allIds(remix(FIXTURE, seed, deps)))).toEqual([])
+    }
+  })
+
+  it('has no duplicate ids after chained remixes', () => {
+    let doc = FIXTURE
+    for (const seed of ['c1', 'c2', 'c3', 'c4', 'c5']) {
+      doc = remix(doc, seed, deps)
+      expect(duplicates(allIds(doc))).toEqual([])
+    }
+  })
+
+  it('has no duplicate ids when a lock carries old ids into a new remix', () => {
+    // Every combination of one lock, remixed twice: the locked section keeps its
+    // ids from run one while run two mints fresh ones alongside them.
+    for (const lock of ['background', 'planet', 'patterns', 'shading', 'accents'] as const) {
+      const first = remix(withLocks({ [lock]: true }), 'lk1', deps)
+      const second = remix({ ...first, locks: { ...NO_LOCKS, [lock]: true } }, 'lk2', deps)
+      expect(duplicates(allIds(second))).toEqual([])
+    }
+  })
+
+  it('gives every layer its own id, so export element ids cannot collide', () => {
+    const out = remix(FIXTURE, 'unique-seed', deps)
+    const layerIds = out.layers.map((l) => l.id)
+    expect(new Set(layerIds).size).toBe(layerIds.length)
+  })
+})
+
 describe('locked sections keep their stack position, not just their contents', () => {
   // A deliberately non-canonical stack: accent mid-stack, shading last.
   const arranged: PlanetDoc = (() => {
