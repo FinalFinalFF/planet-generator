@@ -30,6 +30,10 @@ jobs:
 
       - run: npm ci
 
+      # A regression suite that only runs locally protects nothing, so the
+      # deploy gates on it too.
+      - run: npm test
+
       # `npm run build` is `tsc -b && vite build`, so a type error fails the
       # deploy instead of shipping a broken page.
       - run: npm run build

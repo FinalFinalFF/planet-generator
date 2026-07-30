@@ -12,6 +12,55 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: a deliberately minimal regression suite (`npm test`)
+
+This repo has no test framework by design — it is a visual tool, and correctness
+mostly means "it looks right and the export matches the preview". But three
+contracts are invisible to looking at the screen, and each has already regressed at
+least once during this project:
+
+- **remix determinism and lock absoluteness** (`src/lib/remix.test.ts`) — same seed,
+  palette and locks reproduce the same document; toggling an unrelated lock does not
+  shift another section; a locked section is byte-identical to its input through
+  `remix`, `remixSection` on other sections, and `shuffleColors`; and locked sections
+  keep their stack *position*, not just their contents.
+- **pattern parse output** (`src/lib/patterns/parse.test.ts`) — a snapshot of
+  template + groups, backed by explicit assertions for the things that actually
+  matter: `<mask>` subtrees are not recolored, ids become the `%%ns%%` placeholder,
+  gradient stops and `style="fill:…"` *are* tokenized, hostile markup is stripped,
+  and fully transparent literals are left alone. The explicit assertions exist so a
+  careless `vitest -u` cannot quietly bless a regression the snapshot would absorb.
+- **the ZIP writer** (`src/lib/zip.test.ts`) — byte-level walk of the local headers,
+  central directory and EOCD, with an independently implemented CRC-32 so the test
+  is not merely `zip.ts` agreeing with itself. A malformed archive only fails when
+  someone opens it, which is exactly the kind of bug worth a test.
+
+**This is a scoped exception, not the start of a general suite** — recorded in
+CLAUDE.md and README so it stays that way. 26 tests, ~350 ms.
+
+Setup notes: `vitest.config.ts` is separate from `vite.config.ts`, which carries the
+Pages `base` and the React plugin that tests do not want. Node environment by
+default; only the parse test opts into jsdom, via a `@vitest-environment` docblock,
+since it needs DOMParser/XMLSerializer. Tests import `describe`/`it`/`expect`
+explicitly rather than enabling globals, so `tsconfig.json` needed no change — and
+`tsc -b` now type-checks the tests too. Nothing imports them, so they do not reach
+the bundle (verified).
+
+Determinism is asserted on **id-normalized** output: layer and gradient-stop ids come
+from `nextId()`, a `Date.now()` + counter, not the RNG. Making them seed-derived was
+considered and rejected earlier — they are React keys nothing reads, and generated
+ids could collide with ids retained by locked sections.
+
+**Verified by sabotage**, one contract at a time: a lock-conditional RNG draw in
+`remix()` → 1 failure; removing `mask` from `SKIP_TAGS` in `parse.ts` → 2 failures;
+an off-by-one CRC in `zip.ts` → 2 failures. All restored, all 26 green after.
+
+Two things beyond the brief, both flagged: **CI now runs `npm test` before the
+build**, because a suite that only runs locally protects nobody and a regression
+would otherwise deploy. And two README claims that had gone stale were corrected —
+the control is "Composition style" now, and id namespacing is per rendered instance
+rather than per pattern.
+
 ### Fixed: Remix flattened a user-arranged layer stack, even with sections locked
 
 `remix()` rebuilt `doc.layers` in a canonical order every time —

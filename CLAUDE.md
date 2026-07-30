@@ -5,13 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev         # Vite dev server on :5173
+npm run dev         # Vite dev server on :5173 (redirects to the /planet-generator/ base)
 npm run build       # tsc -b && vite build
 npm run typecheck   # tsc -b --noEmit
+npm test            # vitest run — three contracts that visual QA cannot see
 ```
 
 `tsconfig.json` sets `noUnusedLocals`/`noUnusedParameters`, so an unused import
-fails the build, not just lint. There is no linter and no test framework.
+fails the build, not just lint. There is no linter.
+
+`npm test` is a **deliberately minimal** suite covering only the contracts that
+are invisible to looking at the screen and have each already regressed: remix
+determinism plus lock absoluteness, pattern parse output, and the hand-rolled ZIP
+writer's byte layout. Keep it that way — everything else in this app is verified by
+looking at it (see below). Do not grow this into a general test suite.
+
+The `base` means the dev server serves from `/planet-generator/`; it redirects `/`,
+so the screenshot recipe below still works, but a QA route lives at
+`http://localhost:5173/planet-generator/qa.html`.
 
 ### Keep CHANGELOG.md current
 
@@ -23,9 +34,11 @@ settled choice or re-introduce a fixed bug. Skip it for trivial edits.
 
 ### Verifying changes
 
-There are no automated tests — this is a visual tool, and correctness means "it
-looks right and the export matches the preview". The `mcp__claude-in-chrome__*`
-tools are not connected on this machine; drive Chrome from the CLI instead:
+Almost nothing here is unit-testable — this is a visual tool, and correctness
+mostly means "it looks right and the export matches the preview". `npm test` covers
+the three exceptions listed above; everything else is verified by driving Chrome.
+The `mcp__claude-in-chrome__*` tools are not connected on this machine, so use the
+CLI:
 
 ```bash
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -212,9 +225,10 @@ earlier draws (`!sliced && rng.bool(…)`); it must not depend on `doc.locks`. T
 same rule applies inside `remixGradient`, `remixPatternLayer` and `remixAccents`,
 which each have a `lockColors` path.
 
-This was violated once and fixed — see CHANGELOG. If you change `remix()`, re-run
-a harness like the one described there, and sabotage it once to confirm it is not
-passing vacuously.
+This was violated once and fixed — see CHANGELOG. `src/lib/remix.test.ts` now locks
+it in, along with lock absoluteness and stack-position preservation, so `npm test`
+catches a regression. When you change `remix()`, run it — and if you add an
+assertion, sabotage it once to confirm it is not passing vacuously.
 
 **A lock is absolute** — this is a stated product rule, not an implementation
 detail. Nothing writes to a locked section: not Remix, not Remix All, not

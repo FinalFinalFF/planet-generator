@@ -1,0 +1,81 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parsePatternSvg > matches the recorded shape 1`] = `
+{
+  "groups": [
+    {
+      "index": 0,
+      "isBackground": true,
+      "label": "Plate",
+      "meanL": 0.9999999934735462,
+      "sample": "#ffffff",
+      "tokens": [
+        2,
+      ],
+      "weight": 1,
+    },
+    {
+      "index": 1,
+      "isBackground": false,
+      "label": "Ink 1",
+      "meanL": 0.6122211852537671,
+      "sample": "#e63946",
+      "tokens": [
+        0,
+      ],
+      "weight": 1,
+    },
+    {
+      "index": 2,
+      "isBackground": false,
+      "label": "Ink 2",
+      "meanL": 0.3276419760624852,
+      "sample": "#1d3557",
+      "tokens": [
+        1,
+      ],
+      "weight": 1,
+    },
+    {
+      "index": 3,
+      "isBackground": false,
+      "label": "Ink 3",
+      "meanL": 0.558777952127228,
+      "sample": "#278576",
+      "tokens": [
+        3,
+      ],
+      "weight": 1,
+    },
+    {
+      "index": 4,
+      "isBackground": false,
+      "label": "Ink 4",
+      "meanL": 0.8542191427431391,
+      "sample": "#a8dadc",
+      "tokens": [
+        4,
+      ],
+      "weight": 1,
+    },
+  ],
+  "template": "
+  <defs>
+    <linearGradient id="%%ns%%-grad1" x1="0" y1="0" x2="200" y2="0">
+      <stop stop-color="%%c0%%"/>
+      <stop offset="1" stop-color="%%c1%%"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" fill="%%c2%%"/>
+  <mask id="%%ns%%-m1" style="mask-type:luminance">
+    <rect width="200" height="200" fill="white"/>
+    <circle cx="100" cy="100" r="60" fill="black"/>
+  </mask>
+  <g mask="url(#%%ns%%-m1)">
+    <path d="M0 0H100V100H0V0Z" fill="url(#%%ns%%-grad1)"/>
+    <circle cx="150" cy="150" r="25" fill="%%c3%%"/>
+    <rect x="10" y="10" width="20" height="20" style="fill:%%c4%%"/>
+  </g>
+",
+}
+`;

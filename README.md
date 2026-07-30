@@ -23,7 +23,24 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # type-check + production bundle into dist/
 npm run typecheck
+npm test           # minimal regression suite (see below)
 ```
+
+## Tests
+
+There is no general test suite — this is a visual tool. `npm test` is a deliberate,
+scoped exception for three contracts that looking at the screen cannot check, and
+that have each regressed at least once:
+
+- **remix determinism** — same seed, palette and locks reproduce the same document;
+  a lock is absolute; locked sections keep their stack position
+- **pattern parse output** — a snapshot plus explicit assertions that mask subtrees
+  are not recolored, ids become the `%%ns%%` placeholder, and transparent literals
+  are left alone
+- **the ZIP writer** — byte-level checks of the local headers, central directory
+  and CRCs, since a malformed archive only fails when someone opens it
+
+Everything else is verified by driving headless Chrome; see CLAUDE.md.
 
 ## How it renders
 
@@ -97,7 +114,9 @@ then at load time `src/lib/patterns/parse.ts`:
 4. clusters the unique colors in OKLab into at most 8 assignable groups;
 5. detects the full-bleed background plate these Figma exports usually open
    with, so it can default to hidden and the pattern reads as texture;
-6. namespaces every `id` so many patterns coexist in one `<defs>`.
+6. rewrites every `id` to a `%%ns%%-{id}` placeholder, resolved to a per-instance
+   namespace at recolor time — two layers on the same pattern would otherwise
+   collide, since `url(#…)` resolves document-wide to the first match.
 
 Recoloring is then a single string pass. Within a group, each original color
 keeps its **lightness offset from the group mean**, so a pattern built out of
@@ -133,13 +152,13 @@ Anchor colors are sampled straight off the source images. Where a board gave
 fewer than about six tones, intermediates were interpolated so the dark / mid /
 light thirds the remix deck splits on all exist.
 
-## Planet styles
+## Composition styles
 
-The **Planet style** dropdown at the top of the Planet section applies a recipe
+The **Composition style** dropdown at the top of the Planet section applies a recipe
 that rewrites the planet mode, the shading, and which layers are visible
 together — the looks in the reference material are combinations, not single
-settings. Palette, canvas, seed, locks and pattern choices are left alone, and
-the whole thing is one undo step.
+settings. Palette, canvas, seed and pattern choices are left alone, **locked
+sections are skipped** (the toast names them), and the whole thing is one undo step.
 
 | Style | What it is |
 |---|---|
