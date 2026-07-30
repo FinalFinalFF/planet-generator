@@ -794,6 +794,12 @@ textarea {
   margin: 0;
   border: 1px solid var(--ff-divider);
   background: var(--ff-surface);
+  /* A 5×5 grid scrolls, so skip rendering work for cells that are off-screen.
+     This is editor chrome, not artwork: it lives on the <figure>, never on the
+     <svg>, so it cannot reach the export — `serializeSvg` clones the SVG node
+     and the DOM it clones is unaffected by whether it was painted. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 
 .batch__meta {

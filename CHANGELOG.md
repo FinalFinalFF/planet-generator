@@ -12,6 +12,100 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: the batch panel made every slider drag 22× more expensive
+
+**Symptom:** the app would freeze for seconds at a time. **Culprit: the batch
+panel, and only the batch panel.** It re-dealt and re-rendered the entire grid on
+every single input event, because `cells` keys off `doc` and `doc` is a fresh
+object on every slider frame by design. Per input event, with the panel open at
+5×5, the app was doing **25 `remix()` calls, 26 full `PlanetSvg` renders and 30
+recolors** — and the panel toggles on the bare `B` key, so it is easy to leave
+open by accident and never connect the freeze to it.
+
+Measured, production build, 300 input events (what a 5-second 60 Hz drag emits):
+
+| scenario | mean per input event | worst | main-thread total |
+|---|---|---|---|
+| drag, panel closed | 0.47 ms | 2.4 ms | 140 ms |
+| drag, panel open at 5×5 — **before** | **10.22 ms** | 20.0 ms | 3066 ms |
+| drag, panel open at 5×5 — **after** | **0.54 ms** | 2.3 ms | 162 ms |
+
+3.07 s of main-thread JavaScript for a 5 s drag is ~60% saturation *before* paint,
+with 11.7k DOM nodes to repaint each frame. After the fix a drag with the panel
+open costs the same as one with it closed. Dev-mode numbers are consistently 2×
+prod (StrictMode double-renders: 19.38 ms → 1.56 ms mean, worst 33.2 → 5.3 ms);
+that factor was verified, not assumed, by measuring both.
+
+The fix is three things, all in `ui/BatchPanel.tsx` plus one CSS rule:
+
+1. **`useDeferredValue(doc)` feeds `cells`.** The slider render is urgent and
+   keeps the cells it already has; the re-deal runs at low priority once the drag
+   stops. Intermediate states are skipped rather than queued.
+2. **`BatchCellView` is `React.memo`'d.** Necessary, not redundant: a parent
+   render re-renders children regardless of prop identity, so memoizing `cells`
+   alone would still have re-rendered all 25 cells. This also forced `register`
+   → `onNode`: the old `register(seed)` returned a fresh ref callback per render,
+   which would have defeated the memo and made React re-attach every ref.
+3. **`content-visibility: auto` on `.batch__cell`** so off-screen cells in the
+   scrolling grid skip rendering work.
+
+**What was explicitly *not* the problem.** Recolor/innerHTML churn was the leading
+hypothesis and the profile killed it: `resolveTokens` + `recolor` cost **0.02–0.10
+ms** per call and **83 ms across an entire 8.5-second drag** with *both* pattern
+layers switched to the 325 KB `Geometry Grid 9 1` template — about 1% of the drag.
+Memoizing it would have been churn for nothing. No import-weight warning was added
+either, and the preview host size was left alone. Do not "optimize" the recolor
+path on suspicion; measure first, and note that a 325 KB template is only 687
+elements (a few enormous `<path d>` strings), which is why it recolors cheaply.
+
+**Fidelity is untouched, and this was checked rather than asserted.** Every live
+`<svg>` — the stage plus all 25 cells — was serialized through the real
+`serializeSvg`, in both `expandPatterns` modes, before and after the change with
+the document seed *and* batch seed pinned. All 25 cells came out with identical
+byte counts and identical canonicalized hashes. The raw hashes differ, which is
+expected and not a regression: `nextId()` builds ids from `Date.now()` plus a
+global counter, so literal id strings differ on every run no matter what the code
+does — hence the canonicalization (rename each id to its order of first
+appearance) before comparing.
+
+#### Profiling this app: two traps that cost real time
+
+Both of these produce confidently wrong numbers, so they are worth knowing before
+the next performance investigation.
+
+- **Never measure under `--virtual-time-budget`.** Under virtual time
+  `performance.now()` *is* the virtual clock, so every duration measures ~0 and
+  long tasks never register. A busy-loop sanity check written as
+  `while (Date.now() - t < 250)` "confirms" 250 ms because it advances that clock
+  by definition — it is self-fulfilling. Virtual time also stalls indefinitely on
+  this app (the Vite HMR websocket and the Google Fonts `<link>` both do it), so
+  `--dump-dom` / `--screenshot` can hang for 10 minutes on ~3 s of CPU.
+- **`requestAnimationFrame` does not loop in headless Chrome** — there is no
+  compositor driving frames, so a rAF-paced drag runs exactly one frame. Model a
+  drag as discrete input events pumped through `setTimeout(16)` instead, and set
+  slider values with the native `HTMLInputElement.prototype.value` setter plus a
+  bubbling `input` event, or React never sees the change.
+
+What worked: a temporary in-page driver that scripts the interaction and `POST`s
+its report to a local Python collector, with Chrome launched in **real** time (no
+virtual time) and `--host-resolver-rules` pointing the font hosts at a dead
+address. For screenshots, drive CDP over the Node 24 global `WebSocket` against
+`--remote-debugging-port`, poll for a sentinel element, then
+`Page.captureScreenshot`. Also: always assert what the driver actually grabbed
+(a silent `?? ranges()[0]` fallback measures the wrong control), and keep a
+control scenario that burns a known 300 ms so a zero can be distinguished from
+"not measured" — that check is what made the all-zero JS timings trustworthy.
+
+The instrumentation itself was removed, per the same rule as the QA routes.
+
+**Known limitation of these numbers:** headless with `--disable-gpu` measures
+main-thread JS honestly but does not surface paint/composite cost, so the many
+`mix-blend-mode` layers over a large stage are not represented here. If a freeze
+is ever reported *without* the batch panel open, that is the next thing to look
+at, and it needs a real browser rather than this harness. Relatedly, imported
+patterns live only in `localStorage`, so a headless run with a clean profile
+cannot see them — a very large dropped SVG remains unexamined.
+
 ### Added: a deliberately minimal regression suite (`npm test`)
 
 This repo has no test framework by design — it is a visual tool, and correctness

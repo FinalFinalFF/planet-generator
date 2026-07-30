@@ -6,7 +6,7 @@
  * live nodes exactly like the single-file export does.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { Palette, PlanetDoc } from '../types'
 import { PlanetSvg } from '../render/PlanetSvg'
 import { pickPalette, remix } from '../lib/remix'
@@ -35,6 +35,58 @@ export type BatchCell = {
   doc: PlanetDoc
   palette: Palette
 }
+
+/**
+ * One cell, memoized.
+ *
+ * Without this, every keystroke or slider frame in the editor re-renders all
+ * 9–25 cells even when `cells` itself is unchanged, because a parent render
+ * re-renders children regardless of prop identity. `cell` comes straight out of
+ * the `cells` memo, and `onNode`/`onPromote` are stable, so an unchanged cell
+ * costs nothing. Fidelity is untouched — this changes *when* a cell renders,
+ * never *what* it renders, which is what keeps batch export byte-identical to a
+ * promoted-then-exported document.
+ */
+const BatchCellView = memo(function BatchCellView({
+  cell,
+  parsedById,
+  onNode,
+  onPromote,
+}: {
+  cell: BatchCell
+  parsedById: Map<string, ParsedPattern>
+  onNode: (seed: string, el: SVGSVGElement | null) => void
+  onPromote: (doc: PlanetDoc) => void
+}) {
+  const ref = useCallback((el: SVGSVGElement | null) => onNode(cell.seed, el), [cell.seed, onNode])
+  return (
+    <figure className="batch__cell">
+      <PlanetSvg
+        doc={cell.doc}
+        palette={cell.palette}
+        parsedById={parsedById}
+        svgRef={ref}
+        // Ids must be unique per cell: every one of these lives in the same
+        // document, and defs are referenced by id.
+        idPrefix={`b${cell.seed.replace(/[^a-z0-9]/gi, '')}`}
+        style={{ width: '100%', height: 'auto', display: 'block' }}
+      />
+      <figcaption className="batch__meta">
+        <span className="batch__seed" title={`${cell.seed} · ${cell.palette.name}`}>
+          {cell.seed}
+        </span>
+        <button
+          type="button"
+          className="btn btn--tiny"
+          onClick={() => onPromote(cell.doc)}
+          title="Load this into the editor"
+        >
+          Promote
+        </button>
+      </figcaption>
+    </figure>
+  )
+})
 
 const GRID_OPTIONS = [
   { value: '3', label: '3 × 3' },
@@ -74,7 +126,21 @@ export function BatchPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  /*
+   * The grid is derived from the document, so a slider drag in the editor would
+   * otherwise re-deal all 25 cells on every frame — 25 `remix()` calls and 25
+   * full renders per input event, which measured 22× the cost of the same drag
+   * with the panel shut. Deferring means an urgent render (the slider) keeps the
+   * cells it already has, and the re-deal happens at low priority once the drag
+   * stops. Intermediate states are skipped rather than queued, and the cells
+   * still end up showing the current document.
+   */
+  const deferredDoc = useDeferredValue(doc)
+
   const cells = useMemo<BatchCell[]>(() => {
+    // Shadowed deliberately: everything below must read the deferred document,
+    // never the live prop.
+    const doc = deferredDoc
     const n = Number(cols) ** 2
     // Cell seeds derive from the batch seed, so a batch is reproducible and
     // regenerating is just a new batch seed.
@@ -87,13 +153,13 @@ export function BatchPanel({
       const source = varyPalette ? { ...doc, paletteId: palette.id } : doc
       return { seed, doc: remix(source, seed, { available, palette }), palette }
     })
-  }, [cols, batchSeed, varyPalette, doc, palettes, available])
+  }, [cols, batchSeed, varyPalette, deferredDoc, palettes, available])
 
-  const register = useCallback((seed: string) => {
-    return (el: SVGSVGElement | null) => {
-      if (el) nodes.current.set(seed, el)
-      else nodes.current.delete(seed)
-    }
+  // Stable identity: a fresh callback per render would defeat the memo on
+  // BatchCellView, and would also make React detach and re-attach every ref.
+  const onNode = useCallback((seed: string, el: SVGSVGElement | null) => {
+    if (el) nodes.current.set(seed, el)
+    else nodes.current.delete(seed)
   }, [])
 
   return (
@@ -171,31 +237,13 @@ export function BatchPanel({
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
         {cells.map((cell) => (
-          <figure key={cell.seed} className="batch__cell">
-            <PlanetSvg
-              doc={cell.doc}
-              palette={cell.palette}
-              parsedById={parsedById}
-              svgRef={register(cell.seed)}
-              // Ids must be unique per cell: every one of these lives in the
-              // same document, and defs are referenced by id.
-              idPrefix={`b${cell.seed.replace(/[^a-z0-9]/gi, '')}`}
-              style={{ width: '100%', height: 'auto', display: 'block' }}
-            />
-            <figcaption className="batch__meta">
-              <span className="batch__seed" title={`${cell.seed} · ${cell.palette.name}`}>
-                {cell.seed}
-              </span>
-              <button
-                type="button"
-                className="btn btn--tiny"
-                onClick={() => onPromote(cell.doc)}
-                title="Load this into the editor"
-              >
-                Promote
-              </button>
-            </figcaption>
-          </figure>
+          <BatchCellView
+            key={cell.seed}
+            cell={cell}
+            parsedById={parsedById}
+            onNode={onNode}
+            onPromote={onPromote}
+          />
         ))}
       </div>
     </div>
