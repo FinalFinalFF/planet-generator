@@ -12,6 +12,84 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: Flat mode, a document-level standing constraint
+
+`doc.flat` suppresses everything that creates the illusion of a 3D sphere while
+keeping everything that is genuinely graphic. Distinct from the `flat-disc`
+composition style, which is a one-shot macro that also hides patterns and accents:
+this is a standing constraint that coexists with any style and any remix.
+
+**What counts as a depth cue, and why.** The shading layer entirely — terminator
+shadow, highlight, contact shadow — because each one exists to imply a light
+source falling across a curved surface. Plus the accent layer's **crescent rim
+light**: it lives in Accents, but it reads as light wrapping a limb, so it goes
+while rings and satellites stay. Rings and satellites are graphic marks that would
+look the same drawn flat, which is the line being drawn here.
+
+Gradients of every type stay, including radial and conic. A gradient is a flat
+graphic device; suppressing them would gut the tool rather than flatten it. **The
+vignette stays too**, and that is the one judgement call worth recording: it
+darkens the canvas corners, not the planet, and would look identical behind a
+square, so it never implies a sphere. Flat mode suppresses sphere shading, not
+every soft gradient in the document. The reasoning is repeated in `PlanetSvg` at
+the vignette itself, since that is where someone would come to "fix" it.
+
+**Suppression is render-side, not a data mutation** — the central decision.
+`PlanetSvg` skips `ShadingLayerView` and the rim crescent (dropping the rim's
+gradient def with it, so no dead markup lands in exports). Nothing rewrites layer
+data. Two things follow:
+
+- Toggling flat off restores the user's shading and rim settings *exactly*, because
+  they were never touched. Verified as a byte-identical round trip.
+- **`remix` needs no special casing whatsoever.** This was worth checking rather
+  than assuming, and it holds: `remix` returns `{ ...doc, … }` so the flag
+  survives, and the shading and rim candidates are still drawn — keeping the RNG
+  stream identical, per the draws-always invariant — they just render suppressed.
+  The alternative, forcing `rim.enabled: false` or `shading.visible: false` in
+  remix, would have been a second mechanism doing the same job *and* would have
+  destroyed the settings it was meant to preserve. Same for `applyPlanetStyle`: a
+  style may set `shading.visible: true` and that is fine, flat outranks it at
+  render time.
+
+**Not a lock.** It stays out of `doc.locks`: a lock freezes a section's values
+against randomization, whereas flat changes what renders and leaves values alone.
+Conflating them would have implied Remix must not touch shading under flat, which
+is the opposite of what is wanted.
+
+`detectPlanetStyle` now treats shading as invisible when flat, so a document whose
+only difference from `shaded-sphere` is suppressed shading no longer claims to be
+one — it reports `flat-disc`, which is what is actually on screen.
+
+UI: one control, a checkbox beside Composition style rather than in the Shading
+header. Flat mode suppresses part of Accents as well as all of Shading, so putting
+it in the Shading header would have understated its reach; Composition style is
+already the section's documented precedent for a control that reaches outside its
+own section. While it is on, the shading controls and the rim controls are shown
+disabled with a one-line note, and the Shading section's collapsed header reads
+`flat` so it does not merely look switched off. The disabling uses a
+`<fieldset disabled>` (`Inert` in `controls.tsx`), not `pointer-events: none` —
+the latter only stops the mouse, leaving the controls keyboard-focusable and
+editable.
+
+Verified end to end by driving the production build over CDP: with shading, rim,
+rings, satellites and patterns all live, toggling flat removed all three shading
+defs and the rim while leaving rings, satellites, pattern fills and gradient count
+untouched; five Remix Alls brought nothing shaded back; toggling off restored every
+cue and the same node count; and a real exported SVG contained no shading or rim
+geometry while keeping its gradients. 24 assertions, three consecutive clean runs.
+
+Two traps that made that harness lie before it told the truth, both worth knowing:
+
+- **Seeding `localStorage` and then navigating is a race the app wins.** The
+  outgoing page's `pagehide` flush re-saves its own in-memory document over the
+  seed, so the run passed or failed depending on which write landed last. Build the
+  state through the UI instead.
+- **`chrome.kill()` does not always kill the browser.** With a fixed
+  `--remote-debugging-port`, a later run attaches to an earlier run's surviving
+  browser and inherits its `localStorage` — which ended with flat ON, inverting
+  every assertion into 15 confident, meaningless failures. Use a per-run port, and
+  assert the preconditions: the script now aborts if flat is not off at baseline.
+
 ### Fixed: the batch panel made every slider drag 22× more expensive
 
 **Symptom:** the app would freeze for seconds at a time. **Culprit: the batch

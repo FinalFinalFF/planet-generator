@@ -134,6 +134,31 @@ style" dropdown. Each rewrites planet mode, shading, and layer visibility
 adding a style, add it to `PLANET_STYLES` and `PLANET_STYLE_LABELS` in
 `types.ts` — the dropdown is generated from those.
 
+### Flat mode
+
+`doc.flat` suppresses every 3D cue: the shading layer entirely, plus the accent
+layer's crescent rim light. Gradients, patterns, rings, satellites, background and
+the vignette all stay — the vignette because it is a canvas treatment that would
+look the same behind a square.
+
+Two properties are load-bearing:
+
+- **Suppression is render-side only.** `PlanetSvg` skips `ShadingLayerView` and the
+  rim crescent (with its gradient def, so no dead markup reaches the export);
+  nothing rewrites layer data. That is what lets toggling flat back off restore the
+  user's shading and rim settings exactly. Do not "simplify" this into a data
+  mutation in `remix` or `applyPlanetStyle` — `remix.test.ts` asserts the
+  no-mutation property and will fail.
+- **Because it is render-side, `remix` needs no special casing at all.** `remix`
+  returns `{ ...doc, … }`, so the flag survives; the shading and rim candidates are
+  still drawn, keeping the RNG stream unchanged, and simply render suppressed. A
+  style may set `shading.visible: true`; flat outranks it at render time.
+
+It is deliberately **not** in `doc.locks` — a lock freezes values against
+randomization, this changes what renders. `detectPlanetStyle` treats shading as
+invisible when flat, so a suppressed-shading document does not claim to be
+`shaded-sphere`.
+
 ### Pattern pipeline (three files, one flow)
 
 `src/lib/patterns/` — `source.ts` → `parse.ts` → `registry.ts`.

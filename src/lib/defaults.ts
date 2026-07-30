@@ -294,6 +294,7 @@ export function defaultDoc(seed: string): PlanetDoc {
     },
     layers,
     lockPatternCount: false,
+    flat: false,
     locks: {
       colors: false,
       planet: false,
@@ -330,6 +331,7 @@ export function normalizeDoc(doc: PlanetDoc): PlanetDoc {
     planet,
     layers,
     lockPatternCount: doc.lockPatternCount ?? false,
+    flat: doc.flat ?? false,
   }
 }
 
@@ -500,7 +502,10 @@ export function detectPlanetStyle(doc: PlanetDoc): PlanetStyle | 'custom' {
   if (doc.planet.mode === 'sliced') return 'sliced-sweep'
   const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
   const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-  const shaded = !!shading?.visible
+  // Flat mode suppresses shading at render time, so a document that only differs
+  // from `shaded-sphere` by that suppression must not claim to be one. The
+  // detector reports what is on screen, and under flat there is no shading there.
+  const shaded = !doc.flat && !!shading?.visible
   if (patterns.length === 0) return shaded ? 'shaded-sphere' : 'flat-disc'
   // Only call it overlap-bloom when every visible pattern is lens-confined;
   // a mix of full-disc ink and one lens patch is its own thing.

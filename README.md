@@ -172,6 +172,25 @@ The dropdown also reports **Custom** when the document does not match any recipe
 — for instance the shipped default, which mixes full-disc ink with one lens
 patch.
 
+### Flat mode
+
+**Flat mode** (the checkbox under Composition style) suppresses everything that
+creates the illusion of a 3D sphere and keeps everything that is genuinely
+graphic. Suppressed: the whole shading layer — terminator shadow, highlight,
+contact shadow — and the accent layer's **crescent rim light**. Kept: gradients of
+every type, patterns, rings, satellites, background, and the vignette (a canvas
+treatment that would look the same behind a square, so it never implies a sphere).
+
+Unlike the `Flat disc` style, which is a one-shot macro that also hides patterns
+and accents, flat mode is a **standing constraint**: it coexists with any
+composition style, survives Remix and Remix All, and outranks a style that sets
+shading visible.
+
+It suppresses at render time and never rewrites layer data, so your shading and
+rim settings are still there — turning flat mode off restores them exactly. While
+it is on, those controls are shown disabled with a one-line note, and the Shading
+section header reads `flat`. It is not a lock, so it lives outside `doc.locks`.
+
 ### Sliced sweep
 
 A family is a set of concentric circles about a focus sitting *outside* the

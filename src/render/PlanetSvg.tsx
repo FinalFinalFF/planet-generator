@@ -481,10 +481,17 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
   const rim = layer.rim
   const rimDir = dirFromAngle(rim.angle)
   const rimSpan = Math.max(1, r * clamp(rim.spread, 0.05, 2))
+  /*
+   * The crescent rim light is the one part of the accent layer that is a 3D cue
+   * — it reads as light wrapping a sphere's limb — so flat mode drops it while
+   * rings and satellites stay. Its gradient def goes with it: leaving an unused
+   * def behind would put dead markup in every export.
+   */
+  const showRim = rim.enabled && !ctx.doc.flat
 
   return (
     <Fragment>
-      {rim.enabled && (
+      {showRim && (
         <defs>
           <linearGradient
             id={rimId}
@@ -539,7 +546,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
         )
       })}
 
-      {rim.enabled && (
+      {showRim && (
         <g clipPath={`url(#${prefix}-planet-clip)`} style={blendStyle(rim.blend)}>
           <path
             d={crescentPath(cx, cy, r, rim.angle, -Math.max(0.001, rim.width) * r)}
@@ -606,6 +613,12 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
           />
         </Fragment>
       )}
+      {/*
+       * The vignette survives flat mode. It darkens the canvas corners, not the
+       * planet: it is a background treatment that would look the same behind a
+       * square, so it never implies a sphere. Flat mode suppresses sphere
+       * shading, not every soft gradient in the document.
+       */}
       {vignette > 0.001 && (
         <Fragment>
           <defs>
@@ -715,7 +728,10 @@ export function PlanetSvg({
           return <PatternLayerView key={layer.id} layer={layer} ctx={ctx} />
         }
         if (layer.kind === 'shading') {
-          return doc.planet.visible ? (
+          // Flat mode outranks the layer's own `visible` and any composition
+          // style that set it — suppressed here rather than by rewriting the
+          // layer, so the user's shading settings survive toggling flat off.
+          return doc.planet.visible && !doc.flat ? (
             <ShadingLayerView key={layer.id} layer={layer} ctx={ctx} />
           ) : null
         }

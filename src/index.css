@@ -689,6 +689,23 @@ textarea {
   color: var(--ff-text-muted);
 }
 
+/* A fieldset used purely to disable a group of controls, so it has to shed the
+   border, padding and min-width a fieldset brings and adopt the field stack's
+   own layout. */
+.inert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.inert:disabled {
+  opacity: 0.4;
+}
+
 .row {
   display: flex;
   gap: var(--space-1);

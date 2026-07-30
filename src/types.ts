@@ -261,6 +261,22 @@ export type PlanetDoc = {
    * giving up randomization inside it.
    */
   lockPatternCount: boolean
+  /**
+   * Suppress every cue that reads as a 3D sphere, keeping everything that is
+   * genuinely graphic.
+   *
+   * A **standing constraint**, not a one-shot macro like the `flat-disc`
+   * composition style: it coexists with any style and survives any remix, and it
+   * outranks both at render time. Suppressed: the shading layer entirely, and the
+   * accent layer's crescent rim light. Kept: gradients of every type, patterns,
+   * rings, satellites, background, vignette.
+   *
+   * Deliberately **not** in `doc.locks` — a lock freezes a section's values
+   * against randomization, whereas this changes what renders while leaving the
+   * values alone. Suppression is render-side only (see `PlanetSvg`), so toggling
+   * it off restores the user's shading and rim settings exactly.
+   */
+  flat: boolean
 }
 
 export type Preset = {

@@ -26,6 +26,29 @@ export function Field({
   )
 }
 
+/**
+ * Wrapper that makes a group of controls inert.
+ *
+ * A `<fieldset disabled>` rather than `pointer-events: none`, because that only
+ * stops the mouse — the controls would still take keyboard focus and still be
+ * changeable. `disabled` on a fieldset genuinely disables every form control
+ * inside it. The reset styles are needed because a bare fieldset brings its own
+ * border, padding and min-width, which would break the field layout.
+ */
+export function Inert({
+  disabled,
+  children,
+}: {
+  disabled: boolean
+  children: ReactNode
+}) {
+  return (
+    <fieldset className="inert" disabled={disabled}>
+      {children}
+    </fieldset>
+  )
+}
+
 export function Slider({
   label,
   value,

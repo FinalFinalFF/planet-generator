@@ -210,6 +210,66 @@ describe('ids stay unique', () => {
   })
 })
 
+/*
+ * Flat mode is a standing constraint, not a lock and not a macro: it must survive
+ * any remix, and it must suppress purely at render time. The second half is the
+ * part worth testing here — if suppression ever became a data mutation, remix
+ * would start erasing the shading and rim settings a user is expecting to get
+ * back, and nothing on screen would say so while flat is on.
+ */
+describe('flat mode', () => {
+  const flat: PlanetDoc = { ...FIXTURE, flat: true }
+  const SEEDS = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6']
+
+  it('survives remix and Remix All across many seeds', () => {
+    for (const seed of SEEDS) expect(remix(flat, seed, deps).flat).toBe(true)
+    // Chained, the way repeated Remix All presses compose.
+    let doc = flat
+    for (const seed of SEEDS) {
+      doc = remix(doc, seed, deps)
+      expect(doc.flat).toBe(true)
+    }
+  })
+
+  it('is not turned on by a remix of a non-flat document', () => {
+    for (const seed of SEEDS) expect(remix(FIXTURE, seed, deps).flat).toBe(false)
+  })
+
+  /*
+   * The load-bearing one: flat changes *nothing* in the document but the flag, so
+   * toggling it back off is enough to restore shading exactly. Asserted against a
+   * non-flat remix of the same seed, which pins that no draw was skipped either —
+   * a shading or rim draw removed under flat would shift every later section.
+   */
+  it('changes no layer data, so toggling it off restores shading exactly', () => {
+    for (const seed of SEEDS) {
+      const flatOut = remix(flat, seed, deps)
+      const plainOut = remix(FIXTURE, seed, deps)
+      expect(json({ ...flatOut, flat: false })).toBe(json(plainOut))
+    }
+  })
+
+  it('keeps the shading layer and the rim in the document while suppressed', () => {
+    for (const seed of SEEDS) {
+      const out = remix(flat, seed, deps)
+      // Still present and still editable — the renderer, not the data, hides it.
+      expect(shading(out)).toBeDefined()
+      expect(accents(out)?.rim).toBeDefined()
+    }
+  })
+
+  it('is untouched by remixSection and shuffleColors', () => {
+    for (const section of ['background', 'planet', 'patterns', 'shading', 'accents'] as const) {
+      expect(remixSection(flat, section, `flat-${section}`, deps).flat).toBe(true)
+    }
+    expect(shuffleColors(flat, palette, 'flat-shuffle').flat).toBe(true)
+  })
+
+  it('is not a lock: it does not appear in doc.locks', () => {
+    expect(Object.keys(flat.locks)).not.toContain('flat')
+  })
+})
+
 describe('locked sections keep their stack position, not just their contents', () => {
   // A deliberately non-canonical stack: accent mid-stack, shading last.
   const arranged: PlanetDoc = (() => {

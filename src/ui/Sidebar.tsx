@@ -18,7 +18,17 @@ import {
   type SliceConfig,
 } from '../types'
 import { Section } from './Section'
-import { Check, ColorRefEditor, Field, NumberField, Segmented, Select, Slider, TextField } from './controls'
+import {
+  Check,
+  ColorRefEditor,
+  Field,
+  Inert,
+  NumberField,
+  Segmented,
+  Select,
+  Slider,
+  TextField,
+} from './controls'
 import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
@@ -356,6 +366,23 @@ export function Sidebar(props: SidebarProps) {
           Rewrites planet mode, shading, and layer visibility together. Locked sections are
           left alone.
         </div>
+
+        {/*
+          Flat mode sits next to Composition style because both reach outside this
+          section, and this is where a cross-cutting control is looked for. It is
+          one control, deliberately: a standing constraint rather than a macro, so
+          it stays on through any style and any remix.
+        */}
+        <Check
+          label="Flat mode — no 3D cues"
+          checked={doc.flat}
+          onChange={(flat) => update((d) => ({ ...d, flat }))}
+        />
+        <div className="note">
+          Suppresses shading and the crescent rim light at render time. Gradients, patterns,
+          rings, satellites and the vignette stay. Settings are kept, so turning it off
+          restores them.
+        </div>
         <Check
           label="Visible"
           checked={doc.planet.visible}
@@ -671,18 +698,24 @@ function LayersSection({
                     />
                   )}
                   {layer.kind === 'shading' && (
-                    <ShadingControls
-                      layer={layer}
-                      palette={palette}
-                      onPatch={(recipe, coalesce) =>
-                        patch(layer.id, (l) => recipe(l as ShadingLayer), coalesce)
-                      }
-                    />
+                    <>
+                      {doc.flat && <div className="note">Flat mode — shading suppressed.</div>}
+                      <Inert disabled={doc.flat}>
+                        <ShadingControls
+                          layer={layer}
+                          palette={palette}
+                          onPatch={(recipe, coalesce) =>
+                            patch(layer.id, (l) => recipe(l as ShadingLayer), coalesce)
+                          }
+                        />
+                      </Inert>
+                    </>
                   )}
                   {layer.kind === 'accent' && (
                     <AccentControls
                       layer={layer}
                       palette={palette}
+                      suppressRim={doc.flat}
                       onPatch={(recipe, coalesce) =>
                         patch(layer.id, (l) => recipe(l as AccentLayer), coalesce)
                       }
@@ -1076,7 +1109,9 @@ function ShadingSection({
     <Section
       num="05"
       title="Shading"
-      hint={layer ? (layer.visible ? 'on' : 'hidden') : 'none'}
+      // Flat mode reads in the collapsed header too, so the section does not
+      // look merely switched off when something else is overriding it.
+      hint={doc.flat ? 'flat' : layer ? (layer.visible ? 'on' : 'hidden') : 'none'}
       open={open.shading}
       onToggle={() => onToggleSection('shading')}
       lock={{
@@ -1096,8 +1131,15 @@ function ShadingSection({
         </div>
       ) : (
         <>
-          <Check label="Visible" checked={layer.visible} onChange={(visible) => patch((l) => ({ ...l, visible }))} />
-          <ShadingControls layer={layer} palette={palette} onPatch={patch} />
+          {doc.flat && <div className="note">Flat mode — shading suppressed.</div>}
+          <Inert disabled={doc.flat}>
+            <Check
+              label="Visible"
+              checked={layer.visible}
+              onChange={(visible) => patch((l) => ({ ...l, visible }))}
+            />
+            <ShadingControls layer={layer} palette={palette} onPatch={patch} />
+          </Inert>
         </>
       )}
     </Section>
@@ -1110,10 +1152,13 @@ function AccentControls({
   layer,
   palette,
   onPatch,
+  suppressRim,
 }: {
   layer: AccentLayer
   palette: Palette
   onPatch: (recipe: (l: AccentLayer) => AccentLayer, coalesce?: string) => void
+  /** Flat mode: the rim light does not render, so its controls are inert. */
+  suppressRim: boolean
 }) {
   const patchRing = (id: string, patch: Partial<AccentLayer['rings'][number]>, coalesce?: string) =>
     onPatch(
@@ -1344,60 +1389,65 @@ function AccentControls({
 
       <hr className="divider" />
       <div className="eyebrow">Crescent rim light</div>
-      <Check
-        label="Enabled"
-        checked={layer.rim.enabled}
-        onChange={(enabled) => onPatch((l) => ({ ...l, rim: { ...l.rim, enabled } }))}
-      />
-      {layer.rim.enabled && (
-        <>
-          <Slider
-            label="Angle"
-            value={layer.rim.angle}
-            min={0}
-            max={360}
-            step={1}
-            suffix="°"
-            onChange={(angle) => onPatch((l) => ({ ...l, rim: { ...l.rim, angle } }), `rim-a-${layer.id}`)}
-          />
-          <Slider
-            label="Thickness"
-            value={layer.rim.width}
-            min={0.002}
-            max={0.4}
-            step={0.002}
-            decimals={3}
-            onChange={(width) => onPatch((l) => ({ ...l, rim: { ...l.rim, width } }), `rim-w-${layer.id}`)}
-          />
-          <Slider
-            label="Falloff"
-            value={layer.rim.spread}
-            min={0.05}
-            max={2}
-            onChange={(spread) => onPatch((l) => ({ ...l, rim: { ...l.rim, spread } }), `rim-s-${layer.id}`)}
-          />
-          <Slider
-            label="Opacity"
-            value={layer.rim.opacity}
-            min={0}
-            max={1}
-            onChange={(opacity) => onPatch((l) => ({ ...l, rim: { ...l.rim, opacity } }), `rim-o-${layer.id}`)}
-          />
-          <Select
-            label="Blend mode"
-            value={layer.rim.blend}
-            options={BLEND_OPTIONS}
-            onChange={(blend: BlendMode) => onPatch((l) => ({ ...l, rim: { ...l.rim, blend } }))}
-          />
-          <ColorRefEditor
-            name="Rim color"
-            value={layer.rim.color}
-            palette={palette}
-            showAlpha={false}
-            onChange={(color) => onPatch((l) => ({ ...l, rim: { ...l.rim, color } }))}
-          />
-        </>
-      )}
+      {/* Only the rim goes inert under flat mode — rings and satellites above are
+          graphic, not depth cues, and stay editable. */}
+      {suppressRim && <div className="note">Flat mode — rim light suppressed.</div>}
+      <Inert disabled={suppressRim}>
+        <Check
+          label="Enabled"
+          checked={layer.rim.enabled}
+          onChange={(enabled) => onPatch((l) => ({ ...l, rim: { ...l.rim, enabled } }))}
+        />
+        {layer.rim.enabled && (
+          <>
+            <Slider
+              label="Angle"
+              value={layer.rim.angle}
+              min={0}
+              max={360}
+              step={1}
+              suffix="°"
+              onChange={(angle) => onPatch((l) => ({ ...l, rim: { ...l.rim, angle } }), `rim-a-${layer.id}`)}
+            />
+            <Slider
+              label="Thickness"
+              value={layer.rim.width}
+              min={0.002}
+              max={0.4}
+              step={0.002}
+              decimals={3}
+              onChange={(width) => onPatch((l) => ({ ...l, rim: { ...l.rim, width } }), `rim-w-${layer.id}`)}
+            />
+            <Slider
+              label="Falloff"
+              value={layer.rim.spread}
+              min={0.05}
+              max={2}
+              onChange={(spread) => onPatch((l) => ({ ...l, rim: { ...l.rim, spread } }), `rim-s-${layer.id}`)}
+            />
+            <Slider
+              label="Opacity"
+              value={layer.rim.opacity}
+              min={0}
+              max={1}
+              onChange={(opacity) => onPatch((l) => ({ ...l, rim: { ...l.rim, opacity } }), `rim-o-${layer.id}`)}
+            />
+            <Select
+              label="Blend mode"
+              value={layer.rim.blend}
+              options={BLEND_OPTIONS}
+              onChange={(blend: BlendMode) => onPatch((l) => ({ ...l, rim: { ...l.rim, blend } }))}
+            />
+            <ColorRefEditor
+              name="Rim color"
+              value={layer.rim.color}
+              palette={palette}
+              showAlpha={false}
+              onChange={(color) => onPatch((l) => ({ ...l, rim: { ...l.rim, color } }))}
+            />
+          </>
+        )}
+      </Inert>
     </>
   )
 }
@@ -1445,7 +1495,7 @@ function AccentsSection({
       ) : (
         <>
           <Check label="Visible" checked={layer.visible} onChange={(visible) => patch((l) => ({ ...l, visible }))} />
-          <AccentControls layer={layer} palette={palette} onPatch={patch} />
+          <AccentControls layer={layer} palette={palette} onPatch={patch} suppressRim={doc.flat} />
         </>
       )}
     </Section>
