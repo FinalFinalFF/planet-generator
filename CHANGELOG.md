@@ -12,6 +12,53 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: renamed "planet" to "orb" throughout (`DOC_VERSION` 3)
+
+Product rename. Everything the tool called a planet is now an orb: `PlanetDoc` →
+`OrbDoc`, `PlanetSvg` → `OrbSvg` (file renamed), `Planet` → `Orb`, `PlanetMode`,
+`PlanetStyle`, `PLANET_STYLES`, `applyPlanetStyle`, `detectPlanetStyle`,
+`planetFilename` → `orbFilename`, the `doc.planet` field, the `locks.planet`
+section, the `'planet'` mask mode, the `planet-clip`/`planet-grad` element ids, the
+`planet-{seed}.svg` export filename prefix, the window title and the sidebar label.
+
+**Entries below this one are left as they were written.** They describe decisions
+made when the thing was called a planet, and rewriting them would misrepresent the
+record. Read "planet" in older entries as "orb".
+
+The rename itself was mechanical; the risk was entirely in persisted state, which
+a find-and-replace silently corrupts rather than visibly breaking. Three places
+needed real migration, and all three fail the same way — the user's work appears
+to have been erased:
+
+- **`doc.planet` → `doc.orb`.** `normalizeDoc` reads the legacy field when the new
+  one is absent, and deletes it afterward so the two never coexist. Presets store
+  whole documents, so this rescues saved presets, not just the working document.
+- **`locks.planet` → `locks.orb`, and `mask.mode: 'planet'` → `'orb'`.** Both are
+  persisted string literals inside the document. The lock one is the nastier of
+  the two: it would not throw, it would just quietly unlock a section the user had
+  locked, and a lock is a stated product rule.
+- **`planetgen.*` → `orbgen.*` localStorage keys.** Reads fall through to the old
+  key and copy forward on first read. The legacy key is deliberately *not* deleted,
+  so an accidental downgrade is non-destructive.
+
+`loadDoc`'s shape guard had to be widened to accept `orb` **or** `planet`. Worth
+calling out because it reads like a redundant defensive check: left as `!doc.orb`
+it rejects every v2 document *before* `normalizeDoc` can migrate it, which defeats
+the entire migration while looking correct.
+
+**Verified** with a temporary test file that round-tripped a v2-shaped document
+through `normalizeDoc`, `loadDoc`, `loadPresets` and `loadUi`, then sabotaged both
+the field fallback and the key fallback to confirm the assertions were not passing
+vacuously (5 of 7 failed as expected). Deleted afterward — `npm test` stays the
+three contracts named in CLAUDE.md and this is not one of them.
+
+**Deliberately not renamed:** the Vite `base` (`/planet-generator/`), the Pages URL
+and the GitHub repo slug. `base` must equal the repo name or every asset 404s on
+the live site, so it changes only in lockstep with an actual repo rename. Same for
+the `Experiments/Planets` working directory, which is referenced from the global
+CLAUDE.md. Historical `CLAUDE-CODE-PROMPTS.md` / `CLAUDE-CODE-FIX-PROMPTS.md` were
+left alone for the same reason as the changelog entries below.
+
 ### Added: Flat mode, a document-level standing constraint
 
 `doc.flat` suppresses everything that creates the illusion of a 3D sphere while

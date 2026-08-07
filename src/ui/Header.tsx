@@ -50,7 +50,7 @@ export function Header({
   return (
     <header className="header">
       <div className="header__brand">
-        FinalFinal™ <span>Planet Generator</span>
+        FinalFinal™ <span>Orb Generator</span>
       </div>
 
       <div className="header__rule" />
@@ -168,7 +168,7 @@ export function Header({
           type="button"
           className="btn"
           onClick={() => {
-            const name = window.prompt('Preset name', `Planet ${seed}`)
+            const name = window.prompt('Preset name', `Orb ${seed}`)
             if (name?.trim()) onSavePreset(name.trim())
           }}
         >

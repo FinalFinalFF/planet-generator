@@ -173,11 +173,11 @@ function expandPatternFills(
 }
 
 function safeFilePart(s: string): string {
-  return (s || 'planet').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/(^-|-$)/g, '')
+  return (s || 'orb').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/(^-|-$)/g, '')
 }
 
-export function planetFilename(seed: string, ext: string, suffix = ''): string {
-  return `planet-${safeFilePart(seed)}${suffix ? `-${suffix}` : ''}.${ext}`
+export function orbFilename(seed: string, ext: string, suffix = ''): string {
+  return `orb-${safeFilePart(seed)}${suffix ? `-${suffix}` : ''}.${ext}`
 }
 
 /** Clone the live SVG into a self-contained, standalone document string. */

@@ -1,4 +1,4 @@
-/** The planet document model. Everything the renderer needs, and nothing else. */
+/** The orb document model. Everything the renderer needs, and nothing else. */
 
 export const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'soft-light'] as const
 export type BlendMode = (typeof BLEND_MODES)[number]
@@ -27,7 +27,7 @@ export type Gradient = {
   /** Degrees, clockwise from 12 o'clock. Used by linear and conic. */
   angle: number
   stops: GradientStop[]
-  /** Radial focus, in units of the planet's bounding box (0..1). */
+  /** Radial focus, in units of the orb's bounding box (0..1). */
   focusX: number
   focusY: number
   /** Radial radius as a fraction of the bounding box. */
@@ -48,9 +48,9 @@ export type Background = {
 
 export type PatternFit = 'tile' | 'cover'
 
-export const MASK_MODES = ['planet', 'lens', 'outside-lens'] as const
+export const MASK_MODES = ['orb', 'lens', 'outside-lens'] as const
 /**
- * Where a pattern layer is allowed to paint inside the planet.
+ * Where a pattern layer is allowed to paint inside the orb.
  * `lens` is the intersection with an offset circle, `outside-lens` its
  * complement — the lens-shaped pattern patches in the reference come from these.
  */
@@ -58,10 +58,10 @@ export type MaskMode = (typeof MASK_MODES)[number]
 
 export type LayerMask = {
   mode: MaskMode
-  /** Lens center offset from the planet center, in planet diameters. */
+  /** Lens center offset from the orb center, in orb diameters. */
   cx: number
   cy: number
-  /** Lens radius as a fraction of the planet radius. */
+  /** Lens radius as a fraction of the orb radius. */
   radius: number
   /** 0 = hard edge; higher values fade the lens edge out over that fraction. */
   feather: number
@@ -74,10 +74,10 @@ export type PatternLayer = {
   visible: boolean
   patternId: string
   fit: PatternFit
-  /** 1 = tile spans `TILE_BASE_FRACTION` of the planet diameter. */
+  /** 1 = tile spans `TILE_BASE_FRACTION` of the orb diameter. */
   scale: number
   rotation: number
-  /** Offsets in planet diameters. */
+  /** Offsets in orb diameters. */
   offsetX: number
   offsetY: number
   opacity: number
@@ -98,9 +98,9 @@ export type ShadingLayer = {
   highlight: number
   /** Degrees, clockwise from 12 o'clock — where the light comes from. */
   lightAngle: number
-  /** How far the light sits from center, in planet radii. */
+  /** How far the light sits from center, in orb radii. */
   lightDistance: number
-  /** Highlight size as a fraction of the planet radius. */
+  /** Highlight size as a fraction of the orb radius. */
   highlightSize: number
   /** 0..1 inner rim darkening that seats the sphere. */
   contactShadow: number
@@ -112,7 +112,7 @@ export type ShadingLayer = {
 
 export type RingConfig = {
   id: string
-  /** Radius as a fraction of the planet radius (>1 orbits outside). */
+  /** Radius as a fraction of the orb radius (>1 orbits outside). */
   radius: number
   /** Start angle and sweep in degrees. */
   start: number
@@ -130,10 +130,10 @@ export type RingConfig = {
 
 export type SatelliteConfig = {
   id: string
-  /** Position in polar coords around the planet center. */
+  /** Position in polar coords around the orb center. */
   angle: number
   distance: number
-  /** Radius as a fraction of the planet radius. */
+  /** Radius as a fraction of the orb radius. */
   size: number
   color: ColorRef
   opacity: number
@@ -163,17 +163,17 @@ export type AccentLayer = {
 export type Layer = PatternLayer | ShadingLayer | AccentLayer
 export type LayerKind = Layer['kind']
 
-export const PLANET_MODES = ['disc', 'sliced'] as const
-export type PlanetMode = (typeof PLANET_MODES)[number]
+export const ORB_MODES = ['disc', 'sliced'] as const
+export type OrbMode = (typeof ORB_MODES)[number]
 
 /**
  * The sliced sphere from the reference.
  *
  * A family is a set of concentric circles about a focus sitting *outside* the
- * planet, drawn largest first so each smaller circle paints over the last. What
+ * orb, drawn largest first so each smaller circle paints over the last. What
  * stays visible of each is an annulus, and because the focus is off to one side
  * those annuli read as curved bands sweeping right across the disc. The radii
- * are derived to span the planet exactly, so the bands always reach both limbs.
+ * are derived to span the orb exactly, so the bands always reach both limbs.
  *
  * A second family with a focus `fan` degrees away is laid over translucently;
  * its bands cross the first family's and cut them into the flat diamond cells of
@@ -188,7 +188,7 @@ export type SliceConfig = {
   /** 1 = plain arc bands; 2 = the crossing lattice. */
   families: 1 | 2
   /**
-   * Distance from the planet center to a family's focus, in planet radii.
+   * Distance from the orb center to a family's focus, in orb radii.
    * Near 1 the bands curve hard; large values flatten them toward straight
    * stripes.
    */
@@ -209,9 +209,9 @@ export type SliceConfig = {
   blend: BlendMode
 }
 
-export type Planet = {
+export type Orb = {
   visible: boolean
-  mode: PlanetMode
+  mode: OrbMode
   /** Center as a fraction of canvas width/height. */
   cx: number
   cy: number
@@ -241,17 +241,17 @@ export type Palette = {
   builtin?: boolean
 }
 
-export const LOCK_SECTIONS = ['colors', 'planet', 'patterns', 'shading', 'accents', 'background'] as const
+export const LOCK_SECTIONS = ['colors', 'orb', 'patterns', 'shading', 'accents', 'background'] as const
 export type LockSection = (typeof LOCK_SECTIONS)[number]
 export type Locks = Record<LockSection, boolean>
 
-export type PlanetDoc = {
+export type OrbDoc = {
   version: number
   seed: string
   canvas: Canvas
   paletteId: string
   background: Background
-  planet: Planet
+  orb: Orb
   layers: Layer[]
   locks: Locks
   /**
@@ -273,7 +273,7 @@ export type PlanetDoc = {
    *
    * Deliberately **not** in `doc.locks` — a lock freezes a section's values
    * against randomization, whereas this changes what renders while leaving the
-   * values alone. Suppression is render-side only (see `PlanetSvg`), so toggling
+   * values alone. Suppression is render-side only (see `OrbSvg`), so toggling
    * it off restores the user's shading and rim settings exactly.
    */
   flat: boolean
@@ -283,29 +283,29 @@ export type Preset = {
   id: string
   name: string
   savedAt: number
-  doc: PlanetDoc
+  doc: OrbDoc
 }
 
-export const DOC_VERSION = 2
+export const DOC_VERSION = 3
 
-/** A pattern tile at scale 1 spans this fraction of the planet diameter. */
+/** A pattern tile at scale 1 spans this fraction of the orb diameter. */
 export const TILE_BASE_FRACTION = 0.5
 
 /**
- * Named recipes for the "Planet style" dropdown. Each one rewrites the planet
+ * Named recipes for the "Orb style" dropdown. Each one rewrites the orb
  * mode, the shading, and the layer stack together — the looks in the reference
  * material are combinations, not single settings.
  */
-export const PLANET_STYLES = [
+export const ORB_STYLES = [
   'flat-disc',
   'shaded-sphere',
   'patterned-disc',
   'overlap-bloom',
   'sliced-sweep',
 ] as const
-export type PlanetStyle = (typeof PLANET_STYLES)[number]
+export type OrbStyle = (typeof ORB_STYLES)[number]
 
-export const PLANET_STYLE_LABELS: Record<PlanetStyle, string> = {
+export const ORB_STYLE_LABELS: Record<OrbStyle, string> = {
   'flat-disc': 'Flat disc',
   'shaded-sphere': 'Shaded sphere',
   'patterned-disc': 'Patterned disc',

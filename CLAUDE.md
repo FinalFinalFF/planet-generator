@@ -24,6 +24,12 @@ The `base` means the dev server serves from `/planet-generator/`; it redirects `
 so the screenshot recipe below still works, but a QA route lives at
 `http://localhost:5173/planet-generator/qa.html`.
 
+That path is the **GitHub repo slug**, not the product name — the app is the Orb
+generator, but the repo is still `FinalFinalFF/planet-generator` and Pages serves
+from the repo name. Do not "finish the rename" by editing `base` on its own; it
+only changes together with an actual repo rename, and getting it wrong 404s every
+asset on the live site.
+
 ### Keep CHANGELOG.md current
 
 `CHANGELOG.md` is a **decision log**, not a commit summary. After substantive
@@ -62,7 +68,7 @@ live-preview / exported-SVG / rasterized-PNG triptych for export parity.
 
 ### The one invariant: a single `<svg>` is the source of truth
 
-`src/render/PlanetSvg.tsx` renders the entire artwork as inline SVG.
+`src/render/OrbSvg.tsx` renders the entire artwork as inline SVG.
 `serializeSvg()` in `src/lib/export.ts` clones **that live DOM node** and
 serializes it — SVG export is not a re-render. PNG export rasterizes the same
 serialized string through an `<img>` and canvas.
@@ -96,13 +102,13 @@ This forbids a whole class of otherwise-reasonable changes:
 Shading is the subtle case: its children each carry their own
 `mix-blend-mode` and their own opacity, and the wrapping `<g>` deliberately has
 **no `opacity` attribute**. Group opacity would isolate the group and stop the
-terminator shadow from multiplying against the planet beneath it.
+terminator shadow from multiplying against the orb beneath it.
 
-### Planet render modes
+### Orb render modes
 
-`planet.mode` is `disc` (gradient-filled circle) or `sliced`. `SlicedPlanet`
+`orb.mode` is `disc` (gradient-filled circle) or `sliced`. `SlicedOrb`
 builds the reference's banded lattice from **concentric circles about a focus
-outside the planet**, drawn largest first so each smaller circle paints over the
+outside the orb**, drawn largest first so each smaller circle paints over the
 last and leaves an annulus visible. Two things there are load-bearing and easy to
 undo by accident:
 
@@ -119,19 +125,19 @@ have no scalloped silhouette to gain by running free, they just flood the canvas
 
 ### Pattern layer masks
 
-`layer.mask` restricts where a pattern paints: `planet`, `lens` (intersection with
+`layer.mask` restricts where a pattern paints: `orb`, `lens` (intersection with
 an offset circle) or `outside-lens`, with a `feather`. Implemented as an SVG
 `<mask>` rather than nested clip paths, because one mechanism then covers all
 three cases plus the soft edge. Masks are luminance-based, so the feather
 gradient's stop colors invert between `lens` and `outside-lens`.
 
-### Planet styles
+### Orb styles
 
-`applyPlanetStyle` in `lib/defaults.ts` holds the recipes behind the "Planet
-style" dropdown. Each rewrites planet mode, shading, and layer visibility
+`applyOrbStyle` in `lib/defaults.ts` holds the recipes behind the "Orb
+style" dropdown. Each rewrites orb mode, shading, and layer visibility
 *together* and leaves palette, canvas, seed, locks and pattern choices alone.
-`detectPlanetStyle` reports which one the document resembles, or `custom`. When
-adding a style, add it to `PLANET_STYLES` and `PLANET_STYLE_LABELS` in
+`detectOrbStyle` reports which one the document resembles, or `custom`. When
+adding a style, add it to `ORB_STYLES` and `ORB_STYLE_LABELS` in
 `types.ts` — the dropdown is generated from those.
 
 ### Flat mode
@@ -143,11 +149,11 @@ look the same behind a square.
 
 Two properties are load-bearing:
 
-- **Suppression is render-side only.** `PlanetSvg` skips `ShadingLayerView` and the
+- **Suppression is render-side only.** `OrbSvg` skips `ShadingLayerView` and the
   rim crescent (with its gradient def, so no dead markup reaches the export);
   nothing rewrites layer data. That is what lets toggling flat back off restore the
   user's shading and rim settings exactly. Do not "simplify" this into a data
-  mutation in `remix` or `applyPlanetStyle` — `remix.test.ts` asserts the
+  mutation in `remix` or `applyOrbStyle` — `remix.test.ts` asserts the
   no-mutation property and will fail.
 - **Because it is render-side, `remix` needs no special casing at all.** `remix`
   returns `{ ...doc, … }`, so the flag survives; the shading and rim candidates are
@@ -155,7 +161,7 @@ Two properties are load-bearing:
   style may set `shading.visible: true`; flat outranks it at render time.
 
 It is deliberately **not** in `doc.locks` — a lock freezes values against
-randomization, this changes what renders. `detectPlanetStyle` treats shading as
+randomization, this changes what renders. `detectOrbStyle` treats shading as
 invisible when flat, so a suppressed-shading document does not claim to be
 `shaded-sphere`.
 
@@ -224,11 +230,11 @@ comment naming the source image.
 ### Layer stack
 
 `doc.layers` is an ordered, reorderable array of `pattern` | `shading` |
-`accent`. Background sits below the stack and the planet base gradient directly
+`accent`. Background sits below the stack and the orb base gradient directly
 above it — both fixed, because reordering either above the pattern layers could
-only hide them. Pattern layers are clipped to the planet circle; **accents are
+only hide them. Pattern layers are clipped to the orb circle; **accents are
 not**, which is what makes stack order worth having (an accent layer below the
-patterns puts a ring behind the planet).
+patterns puts a ring behind the orb).
 
 The sidebar surfaces the same shading/accent layer twice: once inline in the
 Layers list and once in its own numbered section. Both edit the same layer by id.
@@ -257,7 +263,7 @@ assertion, sabotage it once to confirm it is not passing vacuously.
 
 **A lock is absolute** — this is a stated product rule, not an implementation
 detail. Nothing writes to a locked section: not Remix, not Remix All, not
-`shuffleColors`, not that section's own dice, and **not `applyPlanetStyle`** (which
+`shuffleColors`, not that section's own dice, and **not `applyOrbStyle`** (which
 respects the locks per section and reports which ones it skipped, so the UI can say
 so). Every exported entry point in `remix.ts` early-returns on `doc.locks`, so a
 caller that forgets to check still cannot break the rule; the UI additionally
@@ -268,15 +274,15 @@ randomizer *or a new macro*.
 **values** — settings and geometry. It does **not** pin the section's rendered
 colors, because every color is a palette-slot reference (`ColorRef`), so swapping
 the palette recolors locked sections too. That is the **Colors lock's** job, and it
-is why "Remix All with Planet locked" looks like it changed the planet: the geometry
+is why "Remix All with Orb locked" looks like it changed the orb: the geometry
 is byte-identical, but Remix All re-rolled the palette. Two consequences worth
 keeping in mind:
 
 - Do not "fix" this by having section locks capture literal hexes. Slot indirection
   is the whole point of the color system; freezing hexes would break palette
   switching for the locked section forever.
-- The `detectPlanetStyle` dropdown reads pattern/shading *visibility*, so remixing
-  those flips the Composition style label even when the planet is locked. That is
+- The `detectOrbStyle` dropdown reads pattern/shading *visibility*, so remixing
+  those flips the Composition style label even when the orb is locked. That is
   the label reporting the composition honestly, not a leak.
 
 The lock chip's tooltip states the settings-vs-colors split (`lockTitle` in
@@ -301,11 +307,11 @@ Remix All should sometimes be a no-op.
 `dealRamp` builds gradient stop runs from a **contiguous, non-wrapping** slice of
 `slotsByLightness`, nudged so the run reaches the light end. Both constraints
 exist because a wrapping run can come out entirely dark, which renders as a black
-hole against a dark background rather than a planet.
+hole against a dark background rather than a orb.
 
 ### Batch and zip export
 
-`ui/BatchPanel.tsx` renders N real `PlanetSvg` instances and hands their live
+`ui/BatchPanel.tsx` renders N real `OrbSvg` instances and hands their live
 nodes to `App.exportBatch`, which serializes them through the same
 `serializeSvg` the single-file export uses — that is what guarantees a batch file
 and a promoted-then-exported file are byte-identical. Every cell needs a distinct
@@ -331,11 +337,28 @@ document and presets, and one 2 MB SVG would take those down with it.
 
 ### Doc migration
 
-`DOC_VERSION` is 2. `loadDoc`/`loadPresets` run documents through
+`DOC_VERSION` is 3. `loadDoc`/`loadPresets` run documents through
 `normalizeDoc` rather than discarding them on a version mismatch — **presets
 store whole documents**, so discarding would silently delete the user's saved
 presets. When adding a field to the doc model, give it a default in
 `normalizeDoc`.
+
+v3 is the planet→orb rename, and it is the one migration that renames rather
+than adds, so it has three moving parts that must stay together:
+
+- `normalizeDoc` reads `doc.planet` when `doc.orb` is absent, maps `locks.planet`
+  to `locks.orb`, and rewrites any pattern layer's `mask.mode: 'planet'` to
+  `'orb'`. It deletes the stale `planet` key so the two never coexist.
+- `loadDoc`'s shape guard accepts **either** `orb` or `planet`. Tightening it to
+  `orb` alone rejects exactly the documents the migration exists to rescue.
+- `storage.ts` reads through to the old `planetgen.*` localStorage keys when the
+  `orbgen.*` key is missing, copying forward on first read and leaving the legacy
+  key in place. Without it a returning user loses their document, custom
+  palettes, presets and imported patterns at once — indistinguishable from the
+  app wiping their work.
+
+The legacy names are load-bearing compatibility, not leftovers. Do not "finish
+the rename" by deleting them.
 
 ## Reference material
 

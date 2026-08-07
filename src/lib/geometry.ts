@@ -37,7 +37,7 @@ export function circlePath(cx: number, cy: number, r: number): string {
 }
 
 /**
- * Crescent (lune): the planet disc minus a disc of the same radius pushed
+ * Crescent (lune): the orb disc minus a disc of the same radius pushed
  * `offset` toward `angleDeg`. Rendered with fill-rule="evenodd".
  */
 export function crescentPath(cx: number, cy: number, r: number, angleDeg: number, offset: number): string {
@@ -88,7 +88,7 @@ export function arcPath(
   return `M${n(p0.x)},${n(p0.y)}A${n(rx)},${n(ry)} ${n(rotation)} ${large},${dir} ${n(p1.x)},${n(p1.y)}`
 }
 
-/** Point on a circle around the planet, for satellite placement. */
+/** Point on a circle around the orb, for satellite placement. */
 export function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const { dx, dy } = dirFromAngle(angleDeg)
   return { x: cx + dx * r, y: cy + dy * r }

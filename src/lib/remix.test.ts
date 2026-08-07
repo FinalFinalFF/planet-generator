@@ -11,7 +11,7 @@ import { remix, remixSection, shuffleColors } from './remix'
 import { defaultDoc } from './defaults'
 import { BUILTIN_PALETTES, paletteById } from './palettes'
 import type { ParsedPattern } from './patterns/parse'
-import type { AccentLayer, Locks, PatternLayer, PlanetDoc, ShadingLayer } from '../types'
+import type { AccentLayer, Locks, PatternLayer, OrbDoc, ShadingLayer } from '../types'
 
 /**
  * Layer and gradient-stop ids come from `nextId()`, which is a Date.now() +
@@ -55,7 +55,7 @@ function fakePattern(id: string): ParsedPattern {
 const NO_LOCKS: Locks = {
   colors: false,
   background: false,
-  planet: false,
+  orb: false,
   patterns: false,
   shading: false,
   accents: false,
@@ -65,15 +65,15 @@ const available = [fakePattern('fake-a'), fakePattern('fake-b')]
 const palette = paletteById(BUILTIN_PALETTES, BUILTIN_PALETTES[0].id)
 const deps = { available, palette }
 
-const FIXTURE: PlanetDoc = { ...defaultDoc('fixture-seed'), locks: { ...NO_LOCKS } }
-const withLocks = (patch: Partial<Locks>): PlanetDoc => ({
+const FIXTURE: OrbDoc = { ...defaultDoc('fixture-seed'), locks: { ...NO_LOCKS } }
+const withLocks = (patch: Partial<Locks>): OrbDoc => ({
   ...FIXTURE,
   locks: { ...NO_LOCKS, ...patch },
 })
 
-const patterns = (d: PlanetDoc) => d.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
-const shading = (d: PlanetDoc) => d.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-const accents = (d: PlanetDoc) => d.layers.find((l): l is AccentLayer => l.kind === 'accent')
+const patterns = (d: OrbDoc) => d.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
+const shading = (d: OrbDoc) => d.layers.find((l): l is ShadingLayer => l.kind === 'shading')
+const accents = (d: OrbDoc) => d.layers.find((l): l is AccentLayer => l.kind === 'accent')
 
 describe('remix determinism', () => {
   it('is reproducible for the same seed, palette and locks', () => {
@@ -96,14 +96,14 @@ describe('remix determinism', () => {
     const shadingLocked = remix(withLocks({ shading: true }), 'seed-1', deps)
 
     // background locked -> everything else identical
-    expect(json(bgLocked.planet)).toBe(json(base.planet))
+    expect(json(bgLocked.orb)).toBe(json(base.orb))
     expect(json(patterns(bgLocked))).toBe(json(patterns(base)))
     expect(json(shading(bgLocked))).toBe(json(shading(base)))
     expect(json(accents(bgLocked))).toBe(json(accents(base)))
 
     // shading locked -> everything else identical
     expect(json(shadingLocked.background)).toBe(json(base.background))
-    expect(json(shadingLocked.planet)).toBe(json(base.planet))
+    expect(json(shadingLocked.orb)).toBe(json(base.orb))
     expect(json(patterns(shadingLocked))).toBe(json(patterns(base)))
     expect(json(accents(shadingLocked))).toBe(json(accents(base)))
   })
@@ -115,8 +115,8 @@ describe('a lock is absolute', () => {
       expect(json(remix(withLocks({ background: true }), seed, deps).background)).toBe(
         json(FIXTURE.background),
       )
-      expect(json(remix(withLocks({ planet: true }), seed, deps).planet)).toBe(
-        json(FIXTURE.planet),
+      expect(json(remix(withLocks({ orb: true }), seed, deps).orb)).toBe(
+        json(FIXTURE.orb),
       )
       expect(json(patterns(remix(withLocks({ patterns: true }), seed, deps)))).toBe(
         json(patterns(FIXTURE)),
@@ -131,10 +131,10 @@ describe('a lock is absolute', () => {
   })
 
   it('remixSection on another section leaves the locked one alone', () => {
-    const doc = withLocks({ planet: true })
+    const doc = withLocks({ orb: true })
     for (const section of ['background', 'patterns', 'shading', 'accents'] as const) {
       const out = remixSection(doc, section, `sec-${section}`, deps)
-      expect(json(out.planet)).toBe(json(doc.planet))
+      expect(json(out.orb)).toBe(json(doc.orb))
     }
   })
 
@@ -150,9 +150,9 @@ describe('a lock is absolute', () => {
 
   it('shuffleColors changes colors but no geometry when colors are unlocked', () => {
     const out = shuffleColors(FIXTURE, palette, 'shuffle-seed')
-    const geometry = (d: PlanetDoc) =>
+    const geometry = (d: OrbDoc) =>
       json({
-        planet: { ...d.planet, gradient: { ...d.planet.gradient, stops: null }, stroke: null },
+        orb: { ...d.orb, gradient: { ...d.orb.gradient, stops: null }, stroke: null },
         canvas: d.canvas,
         patternGeometry: patterns(d).map((p) => [p.scale, p.rotation, p.offsetX, p.offsetY, p.fit]),
       })
@@ -173,10 +173,10 @@ describe('ids stay unique', () => {
     const seen = new Set<string>()
     return [...new Set(values.filter((v) => seen.has(v) || (seen.add(v), false)))]
   }
-  const allIds = (d: PlanetDoc) => [
+  const allIds = (d: OrbDoc) => [
     ...d.layers.map((l) => l.id),
     ...d.background.gradient.stops.map((s) => s.id),
-    ...d.planet.gradient.stops.map((s) => s.id),
+    ...d.orb.gradient.stops.map((s) => s.id),
   ]
 
   it('has no duplicate ids after a single remix', () => {
@@ -196,7 +196,7 @@ describe('ids stay unique', () => {
   it('has no duplicate ids when a lock carries old ids into a new remix', () => {
     // Every combination of one lock, remixed twice: the locked section keeps its
     // ids from run one while run two mints fresh ones alongside them.
-    for (const lock of ['background', 'planet', 'patterns', 'shading', 'accents'] as const) {
+    for (const lock of ['background', 'orb', 'patterns', 'shading', 'accents'] as const) {
       const first = remix(withLocks({ [lock]: true }), 'lk1', deps)
       const second = remix({ ...first, locks: { ...NO_LOCKS, [lock]: true } }, 'lk2', deps)
       expect(duplicates(allIds(second))).toEqual([])
@@ -218,7 +218,7 @@ describe('ids stay unique', () => {
  * back, and nothing on screen would say so while flat is on.
  */
 describe('flat mode', () => {
-  const flat: PlanetDoc = { ...FIXTURE, flat: true }
+  const flat: OrbDoc = { ...FIXTURE, flat: true }
   const SEEDS = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6']
 
   it('survives remix and Remix All across many seeds', () => {
@@ -259,7 +259,7 @@ describe('flat mode', () => {
   })
 
   it('is untouched by remixSection and shuffleColors', () => {
-    for (const section of ['background', 'planet', 'patterns', 'shading', 'accents'] as const) {
+    for (const section of ['background', 'orb', 'patterns', 'shading', 'accents'] as const) {
       expect(remixSection(flat, section, `flat-${section}`, deps).flat).toBe(true)
     }
     expect(shuffleColors(flat, palette, 'flat-shuffle').flat).toBe(true)
@@ -272,7 +272,7 @@ describe('flat mode', () => {
 
 describe('locked sections keep their stack position, not just their contents', () => {
   // A deliberately non-canonical stack: accent mid-stack, shading last.
-  const arranged: PlanetDoc = (() => {
+  const arranged: OrbDoc = (() => {
     const ps = patterns(FIXTURE)
     return {
       ...FIXTURE,
@@ -310,7 +310,7 @@ describe('locked sections keep their stack position, not just their contents', (
 
   it('does not re-seat shading that sits below the patterns', () => {
     const ps = patterns(FIXTURE)
-    const doc: PlanetDoc = {
+    const doc: OrbDoc = {
       ...FIXTURE,
       layers: [shading(FIXTURE)!, ps[0], accents(FIXTURE)!, ps[1]],
       locks: { ...NO_LOCKS, shading: true, patterns: true, accents: true },

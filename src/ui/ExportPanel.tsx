@@ -55,7 +55,7 @@ export function ExportPanel({
         </div>
       )}
       <div className="note">
-        Filenames use the seed: <strong>planet-{seed || 'seed'}.svg</strong>. This toggle also
+        Filenames use the seed: <strong>orb-{seed || 'seed'}.svg</strong>. This toggle also
         applies to the <kbd>E</kbd> shortcut and to batch exports.
       </div>
 

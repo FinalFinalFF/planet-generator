@@ -1,21 +1,38 @@
 /** localStorage persistence. Every read is defensive: bad data falls back. */
 
-import type { Palette, PlanetDoc, Preset } from '../types'
+import type { Palette, OrbDoc, Preset } from '../types'
 import { DOC_VERSION } from '../types'
 import { normalizeDoc } from './defaults'
 
 const KEYS = {
-  doc: 'planetgen.doc.v1',
-  palettes: 'planetgen.palettes.v1',
-  presets: 'planetgen.presets.v1',
-  patterns: 'planetgen.patterns.v1',
-  ui: 'planetgen.ui.v1',
+  doc: 'orbgen.doc.v1',
+  palettes: 'orbgen.palettes.v1',
+  presets: 'orbgen.presets.v1',
+  patterns: 'orbgen.patterns.v1',
+  ui: 'orbgen.ui.v1',
 } as const
+
+/**
+ * These were `planetgen.*` before the planet→orb rename. Reading through to the
+ * old key keeps a returning user's document, custom palettes, saved presets and
+ * imported patterns — dropping them would look exactly like the app wiping their
+ * work. The copy happens on first read and the legacy key is left in place, so
+ * an accidental downgrade is not destructive.
+ */
+const LEGACY_PREFIX = 'planetgen.'
 
 function read<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return null
+    let raw = localStorage.getItem(key)
+    if (!raw) {
+      raw = localStorage.getItem(key.replace(/^orbgen\./, LEGACY_PREFIX))
+      if (!raw) return null
+      try {
+        localStorage.setItem(key, raw)
+      } catch {
+        // Migrating in place is best-effort; the read below still succeeds.
+      }
+    }
     return JSON.parse(raw) as T
   } catch {
     return null
@@ -30,10 +47,14 @@ function write(key: string, value: unknown): void {
   }
 }
 
-export function loadDoc(): PlanetDoc | null {
-  const doc = read<PlanetDoc>(KEYS.doc)
+export function loadDoc(): OrbDoc | null {
+  const doc = read<OrbDoc>(KEYS.doc)
   if (!doc || typeof doc !== 'object') return null
-  if (!doc.canvas || !doc.planet || !Array.isArray(doc.layers)) return null
+  // A v2 document carries `planet` instead of `orb`; `normalizeDoc` renames it,
+  // so this guard has to accept either or it would reject the very documents the
+  // migration exists to rescue.
+  const hasOrb = !!doc.orb || !!(doc as unknown as { planet?: unknown }).planet
+  if (!doc.canvas || !hasOrb || !Array.isArray(doc.layers)) return null
   // Older versions are migrated rather than discarded.
   if (doc.version > DOC_VERSION) return null
   try {
@@ -43,7 +64,7 @@ export function loadDoc(): PlanetDoc | null {
   }
 }
 
-export const saveDoc = (doc: PlanetDoc) => write(KEYS.doc, doc)
+export const saveDoc = (doc: OrbDoc) => write(KEYS.doc, doc)
 
 export function loadPalettes(): Palette[] {
   const list = read<Palette[]>(KEYS.palettes)
@@ -125,5 +146,11 @@ export type UiState = {
   selectedLayerId: string | null
 }
 
-export const loadUi = () => read<Partial<UiState>>(KEYS.ui)
+export function loadUi(): Partial<UiState> | null {
+  const ui = read<Partial<UiState>>(KEYS.ui)
+  if (!ui?.openSections) return ui
+  // The orb section's key used to be 'planet'; without this the section a user
+  // left open comes back collapsed.
+  return { ...ui, openSections: ui.openSections.map((k) => (k === 'planet' ? 'orb' : k)) }
+}
 export const saveUi = (ui: UiState) => write(KEYS.ui, ui)

@@ -22,8 +22,8 @@ function crc32(bytes: Uint8Array): number {
 }
 
 const ENTRIES = [
-  { name: 'planet-alpha.svg', text: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
-  { name: 'nested/planet-beta.svg', text: '<svg/>'.repeat(50) },
+  { name: 'orb-alpha.svg', text: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
+  { name: 'nested/orb-beta.svg', text: '<svg/>'.repeat(50) },
 ]
 
 async function build() {

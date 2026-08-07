@@ -2,8 +2,8 @@ import { useState } from 'react'
 import {
   BLEND_MODES,
   MASK_MODES,
-  PLANET_STYLES,
-  PLANET_STYLE_LABELS,
+  ORB_STYLES,
+  ORB_STYLE_LABELS,
   type AccentLayer,
   type BlendMode,
   type Layer,
@@ -11,8 +11,8 @@ import {
   type LockSection,
   type Palette,
   type PatternLayer,
-  type PlanetDoc,
-  type PlanetStyle,
+  type OrbDoc,
+  type OrbStyle,
   type Preset,
   type ShadingLayer,
   type SliceConfig,
@@ -33,12 +33,12 @@ import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
-import { DEFAULT_LAYER_MASK, detectPlanetStyle, nextId } from '../lib/defaults'
+import { DEFAULT_LAYER_MASK, detectOrbStyle, nextId } from '../lib/defaults'
 
 const BLEND_OPTIONS = BLEND_MODES.map((b) => ({ value: b, label: b }))
 const MASK_OPTIONS = MASK_MODES.map((m) => ({
   value: m,
-  label: m === 'planet' ? 'whole disc' : m === 'lens' ? 'lens' : 'outside lens',
+  label: m === 'orb' ? 'whole disc' : m === 'lens' ? 'lens' : 'outside lens',
 }))
 
 const ASPECTS = [
@@ -49,7 +49,7 @@ const ASPECTS = [
 ]
 
 export type SidebarProps = {
-  doc: PlanetDoc
+  doc: OrbDoc
   palette: Palette
   parsedById: Map<string, ParsedPattern>
   presets: Preset[]
@@ -57,12 +57,12 @@ export type SidebarProps = {
   onToggleSection: (key: string) => void
   selectedLayerId: string | null
   onSelectLayer: (id: string | null) => void
-  update: (recipe: (d: PlanetDoc) => PlanetDoc, coalesce?: string) => void
+  update: (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => void
   onAddPatternLayer: (patternId: string) => void
   onSetLayerPattern: (layerId: string, patternId: string) => void
   palettePanel: Omit<PalettePanelProps, 'palette'>
   exportPanel: ExportPanelProps
-  onApplyPlanetStyle: (style: PlanetStyle) => void
+  onApplyOrbStyle: (style: OrbStyle) => void
   /** Randomize one section, leaving the rest of the composition alone. */
   onRandomizeSection: (section: Exclude<LockSection, 'colors'>) => void
   /** The Palette section's dice picks a different palette. */
@@ -184,7 +184,7 @@ function MaskControls({
         options={MASK_OPTIONS}
         onChange={(mode) => onPatch({ mode })}
       />
-      {mask.mode !== 'planet' && (
+      {mask.mode !== 'orb' && (
         <>
           <div className="grid2">
             <Slider
@@ -338,32 +338,32 @@ export function Sidebar(props: SidebarProps) {
         />
       </Section>
 
-      {/* 03 — Planet */}
+      {/* 03 — Orb */}
       <Section
         num="03"
-        title="Planet"
-        hint={doc.planet.mode === 'sliced' ? 'sliced' : doc.planet.gradient.type}
-        open={open.planet}
-        onToggle={() => onToggleSection('planet')}
-        lock={lockFor('planet')}
-        randomize={diceFor('planet', 'the planet')}
+        title="Orb"
+        hint={doc.orb.mode === 'sliced' ? 'sliced' : doc.orb.gradient.type}
+        open={open.orb}
+        onToggle={() => onToggleSection('orb')}
+        lock={lockFor('orb')}
+        randomize={diceFor('orb', 'the orb')}
       >
-        {/* Deliberately not called "Planet style": it reaches outside this
+        {/* Deliberately not called "Orb style": it reaches outside this
             section. It lives here because that is where it is looked for. */}
         <Select
           label="Composition style"
-          value={detectPlanetStyle(doc)}
+          value={detectOrbStyle(doc)}
           options={[
-            ...PLANET_STYLES.map((s) => ({ value: s, label: PLANET_STYLE_LABELS[s] })),
+            ...ORB_STYLES.map((s) => ({ value: s, label: ORB_STYLE_LABELS[s] })),
             { value: 'custom' as const, label: 'Custom' },
           ]}
           onChange={(style) => {
             if (style === 'custom') return
-            props.onApplyPlanetStyle(style as PlanetStyle)
+            props.onApplyOrbStyle(style as OrbStyle)
           }}
         />
         <div className="note">
-          Rewrites planet mode, shading, and layer visibility together. Locked sections are
+          Rewrites orb mode, shading, and layer visibility together. Locked sections are
           left alone.
         </div>
 
@@ -385,43 +385,43 @@ export function Sidebar(props: SidebarProps) {
         </div>
         <Check
           label="Visible"
-          checked={doc.planet.visible}
-          onChange={(visible) => update((d) => ({ ...d, planet: { ...d.planet, visible } }))}
+          checked={doc.orb.visible}
+          onChange={(visible) => update((d) => ({ ...d, orb: { ...d.orb, visible } }))}
         />
         <Segmented
           label="Render mode"
-          value={doc.planet.mode}
+          value={doc.orb.mode}
           options={[
             { value: 'disc', label: 'disc' },
             { value: 'sliced', label: 'sliced' },
           ]}
-          onChange={(mode) => update((d) => ({ ...d, planet: { ...d.planet, mode } }))}
+          onChange={(mode) => update((d) => ({ ...d, orb: { ...d.orb, mode } }))}
         />
         <Slider
           label="Radius"
-          value={doc.planet.radius}
+          value={doc.orb.radius}
           min={0.05}
           max={1.4}
-          onChange={(radius) => update((d) => ({ ...d, planet: { ...d.planet, radius } }), 'pl-r')}
+          onChange={(radius) => update((d) => ({ ...d, orb: { ...d.orb, radius } }), 'pl-r')}
         />
         <div className="grid2">
           <Slider
             label="Center X"
-            value={doc.planet.cx}
+            value={doc.orb.cx}
             min={-0.5}
             max={1.5}
-            onChange={(cx) => update((d) => ({ ...d, planet: { ...d.planet, cx } }), 'pl-cx')}
+            onChange={(cx) => update((d) => ({ ...d, orb: { ...d.orb, cx } }), 'pl-cx')}
           />
           <Slider
             label="Center Y"
-            value={doc.planet.cy}
+            value={doc.orb.cy}
             min={-0.5}
             max={1.5}
-            onChange={(cy) => update((d) => ({ ...d, planet: { ...d.planet, cy } }), 'pl-cy')}
+            onChange={(cy) => update((d) => ({ ...d, orb: { ...d.orb, cy } }), 'pl-cy')}
           />
         </div>
         <hr className="divider" />
-        {doc.planet.mode === 'sliced' && (
+        {doc.orb.mode === 'sliced' && (
           <>
             <div className="eyebrow">Slices</div>
             <div className="note">
@@ -429,10 +429,10 @@ export function Sidebar(props: SidebarProps) {
               where they cross they compound into flat cells. The ramp below colors them.
             </div>
             <SliceControls
-              slices={doc.planet.slices}
+              slices={doc.orb.slices}
               onPatch={(patch, coalesce) =>
                 update(
-                  (d) => ({ ...d, planet: { ...d.planet, slices: { ...d.planet.slices, ...patch } } }),
+                  (d) => ({ ...d, orb: { ...d.orb, slices: { ...d.orb.slices, ...patch } } }),
                   coalesce,
                 )
               }
@@ -441,58 +441,58 @@ export function Sidebar(props: SidebarProps) {
           </>
         )}
         <div className="eyebrow">
-          {doc.planet.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
+          {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
         </div>
         <GradientEditor
-          gradient={doc.planet.gradient}
+          gradient={doc.orb.gradient}
           palette={palette}
           onChange={(gradient, coalesce) =>
-            update((d) => ({ ...d, planet: { ...d.planet, gradient } }), coalesce)
+            update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
           }
         />
         <hr className="divider" />
         <Check
           label="Outline"
-          checked={doc.planet.stroke.enabled}
+          checked={doc.orb.stroke.enabled}
           onChange={(enabled) =>
-            update((d) => ({ ...d, planet: { ...d.planet, stroke: { ...d.planet.stroke, enabled } } }))
+            update((d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, enabled } } }))
           }
         />
-        {doc.planet.stroke.enabled && (
+        {doc.orb.stroke.enabled && (
           <>
             <Slider
               label="Outline width"
-              value={doc.planet.stroke.width}
+              value={doc.orb.stroke.width}
               min={0.2}
               max={40}
               step={0.2}
               decimals={1}
               onChange={(width) =>
                 update(
-                  (d) => ({ ...d, planet: { ...d.planet, stroke: { ...d.planet.stroke, width } } }),
+                  (d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, width } } }),
                   'pl-sw',
                 )
               }
             />
             <Slider
               label="Outline opacity"
-              value={doc.planet.stroke.opacity}
+              value={doc.orb.stroke.opacity}
               min={0}
               max={1}
               onChange={(opacity) =>
                 update(
-                  (d) => ({ ...d, planet: { ...d.planet, stroke: { ...d.planet.stroke, opacity } } }),
+                  (d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, opacity } } }),
                   'pl-so',
                 )
               }
             />
             <ColorRefEditor
               name="Outline color"
-              value={doc.planet.stroke.color}
+              value={doc.orb.stroke.color}
               palette={palette}
               showAlpha={false}
               onChange={(color) =>
-                update((d) => ({ ...d, planet: { ...d.planet, stroke: { ...d.planet.stroke, color } } }))
+                update((d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, color } } }))
               }
             />
           </>
@@ -744,7 +744,7 @@ function AddLayerRow({
   onAddPatternLayer,
   patternOptions,
 }: {
-  doc: PlanetDoc
+  doc: OrbDoc
   update: SidebarProps['update']
   onAddPatternLayer: (patternId: string) => void
   patternOptions: SidebarProps['patternOptions']
@@ -866,8 +866,8 @@ function AddLayerRow({
       </div>
       <div className="note">
         {doc.layers.length} layer{doc.layers.length === 1 ? '' : 's'}. Pattern layers are clipped to
-        the planet circle; accents are not, so moving one below the patterns puts a ring behind the
-        planet.
+        the orb circle; accents are not, so moving one below the patterns puts a ring behind the
+        orb.
       </div>
     </>
   )

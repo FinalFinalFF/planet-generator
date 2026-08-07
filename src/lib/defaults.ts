@@ -7,11 +7,12 @@ import {
   type Layer,
   type LayerMask,
   type LockSection,
+  type Locks,
   type MaskMode,
   type PatternLayer,
-  type Planet,
-  type PlanetDoc,
-  type PlanetStyle,
+  type Orb,
+  type OrbDoc,
+  type OrbStyle,
   type ShadingLayer,
   type SliceConfig,
 } from '../types'
@@ -47,7 +48,7 @@ export function stop(offset: number, slot: number, alpha = 1) {
 }
 
 export const DEFAULT_LAYER_MASK: LayerMask = {
-  mode: 'planet',
+  mode: 'orb',
   cx: 0.22,
   cy: -0.18,
   radius: 0.85,
@@ -73,7 +74,7 @@ export const DEFAULT_SLICES: SliceConfig = {
 
 /**
  * Sensible palette-slot assignment for a freshly added pattern layer.
- * The plate is hidden so the pattern reads as texture over the planet, and ink
+ * The plate is hidden so the pattern reads as texture over the orb, and ink
  * groups get light or dark slots depending on how the layer will blend.
  */
 export function defaultPatternColors(
@@ -201,7 +202,7 @@ const DEFAULT_PATTERN_B = 'geometry-grid-patterns-4' // dot halftone
  * halftone and a voronoi wash, seated with sphere shading and a tilted orbit.
  * Pattern layer colors are filled in once the pattern files have parsed.
  */
-export function defaultDoc(seed: string): PlanetDoc {
+export function defaultDoc(seed: string): OrbDoc {
   const layers: Layer[] = [
     {
       // Crisp ink over the gradient, the way the reference discs read —
@@ -266,7 +267,7 @@ export function defaultDoc(seed: string): PlanetDoc {
       }),
       vignette: 0.35,
     },
-    planet: {
+    orb: {
       visible: true,
       mode: 'disc',
       cx: 0.5,
@@ -297,7 +298,7 @@ export function defaultDoc(seed: string): PlanetDoc {
     flat: false,
     locks: {
       colors: false,
-      planet: false,
+      orb: false,
       patterns: false,
       shading: false,
       accents: false,
@@ -311,34 +312,66 @@ export const DEFAULT_PATTERN_IDS = [DEFAULT_PATTERN_A, DEFAULT_PATTERN_B]
 /* ---------- migration ---------- */
 
 /**
+ * The v2 shape, before "planet" was renamed to "orb" throughout. Presets store
+ * whole documents and the working document is persisted, so these field names
+ * are still sitting in real users' localStorage and have to keep loading.
+ */
+type LegacyDoc = Omit<OrbDoc, 'orb' | 'locks'> & {
+  orb?: Orb
+  planet?: Orb
+  locks: Partial<Record<LockSection | 'planet', boolean>>
+}
+
+/**
  * Fill in anything a document saved by an older version is missing. Presets
  * store whole documents, so a v1 preset has to keep loading.
  */
-export function normalizeDoc(doc: PlanetDoc): PlanetDoc {
-  const planet = {
-    ...doc.planet,
-    mode: doc.planet.mode ?? 'disc',
-    slices: { ...DEFAULT_SLICES, ...(doc.planet.slices ?? {}) },
+export function normalizeDoc(input: OrbDoc): OrbDoc {
+  // v2 and earlier called this `planet`. Renaming the field rather than aliasing
+  // it keeps one name in the model; the cost is this migration.
+  const doc = input as unknown as LegacyDoc
+  const base = doc.orb ?? doc.planet
+  if (!base) throw new Error('document has neither `orb` nor legacy `planet`')
+
+  const orb = {
+    ...base,
+    mode: base.mode ?? 'disc',
+    slices: { ...DEFAULT_SLICES, ...(base.slices ?? {}) },
   }
   const layers = doc.layers.map((layer) =>
     layer.kind === 'pattern'
-      ? { ...layer, mask: { ...DEFAULT_LAYER_MASK, ...(layer.mask ?? {}) } }
+      ? {
+          ...layer,
+          mask: {
+            ...DEFAULT_LAYER_MASK,
+            ...(layer.mask ?? {}),
+            // The mask mode was a string literal, so it migrates too.
+            mode: ((layer.mask?.mode as string) === 'planet'
+              ? 'orb'
+              : (layer.mask?.mode ?? DEFAULT_LAYER_MASK.mode)) as MaskMode,
+          },
+        }
       : layer,
   )
-  return {
+
+  const { planet: legacyPlanetLock, ...locks } = doc.locks ?? {}
+  const out = {
     ...doc,
     version: DOC_VERSION,
-    planet,
+    orb,
     layers,
+    locks: { ...locks, orb: locks.orb ?? legacyPlanetLock ?? false } as Locks,
     lockPatternCount: doc.lockPatternCount ?? false,
     flat: doc.flat ?? false,
   }
+  delete (out as { planet?: unknown }).planet
+  return out as OrbDoc
 }
 
-/* ---------- planet style recipes ---------- */
+/* ---------- orb style recipes ---------- */
 
 /**
- * Each style rewrites the planet mode, the shading, and the layer stack
+ * Each style rewrites the orb mode, the shading, and the layer stack
  * together — the reference looks are combinations of all three, not one setting.
  * Palette, canvas, seed, locks and pattern choices are left alone.
  */
@@ -348,19 +381,19 @@ export function normalizeDoc(doc: PlanetDoc): PlanetDoc {
  * lives in exactly one place.
  */
 type StylePlan = {
-  planet: (prev: Planet) => Planet
+  orb: (prev: Orb) => Orb
   pattern: (prev: PatternLayer, index: number) => PatternLayer
   shading: Partial<ShadingLayer>
   accentsVisible: boolean
 }
 
-function planFor(style: PlanetStyle): StylePlan {
+function planFor(style: OrbStyle): StylePlan {
   switch (style) {
     case 'flat-disc':
       // The plain gradient circles of the reference: no shading at all, so the
       // disc stays graphic rather than photographic.
       return {
-        planet: (p) => ({ ...p, mode: 'disc' }),
+        orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p) => ({ ...p, visible: false }),
         shading: { visible: false },
         accentsVisible: false,
@@ -368,7 +401,7 @@ function planFor(style: PlanetStyle): StylePlan {
 
     case 'shaded-sphere':
       return {
-        planet: (p) => ({ ...p, mode: 'disc' }),
+        orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p) => ({ ...p, visible: false }),
         shading: {
           visible: true,
@@ -387,13 +420,13 @@ function planFor(style: PlanetStyle): StylePlan {
       // Crisp ink across the whole disc, shading pulled back so the pattern
       // stays legible edge to edge.
       return {
-        planet: (p) => ({ ...p, mode: 'disc' }),
+        orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p, i) => ({
           ...p,
           visible: true,
           blend: (i === 0 ? 'normal' : p.blend) as BlendMode,
           opacity: i === 0 ? 0.72 : p.opacity,
-          mask: { ...p.mask, mode: 'planet' as const },
+          mask: { ...p.mask, mode: 'orb' as const },
         }),
         shading: {
           visible: true,
@@ -410,7 +443,7 @@ function planFor(style: PlanetStyle): StylePlan {
       // lens so textures meet in lens-shaped patches instead of covering
       // the whole disc.
       return {
-        planet: (p) => ({ ...p, mode: 'disc' }),
+        orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p, i) => ({
           ...p,
           visible: true,
@@ -430,9 +463,9 @@ function planFor(style: PlanetStyle): StylePlan {
 
     case 'sliced-sweep':
       // Patterns and the terminator both fight the slice lattice, so the
-      // slices carry the whole planet and only the accents stay.
+      // slices carry the whole orb and only the accents stay.
       return {
-        planet: (p) => ({ ...p, mode: 'sliced', slices: { ...DEFAULT_SLICES, ...p.slices } }),
+        orb: (p) => ({ ...p, mode: 'sliced', slices: { ...DEFAULT_SLICES, ...p.slices } }),
         pattern: (p) => ({ ...p, visible: false }),
         shading: { visible: false },
         accentsVisible: true,
@@ -440,8 +473,8 @@ function planFor(style: PlanetStyle): StylePlan {
   }
 }
 
-export type PlanetStyleResult = {
-  doc: PlanetDoc
+export type OrbStyleResult = {
+  doc: OrbDoc
   /** Sections a lock kept the style from touching, for the caller to report. */
   skipped: LockSection[]
 }
@@ -455,7 +488,7 @@ export type PlanetStyleResult = {
  * which the old rebuild silently restacked, and it also stops a duplicated
  * shading or accent layer being dropped.
  */
-export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetStyleResult {
+export function applyOrbStyle(doc: OrbDoc, style: OrbStyle): OrbStyleResult {
   const plan = planFor(style)
   const { locks } = doc
 
@@ -464,7 +497,7 @@ export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetStyl
   const hasAccent = doc.layers.some((l) => l.kind === 'accent')
 
   const skipped: LockSection[] = []
-  if (locks.planet) skipped.push('planet')
+  if (locks.orb) skipped.push('orb')
   if (locks.patterns && hasPattern) skipped.push('patterns')
   if (locks.shading) skipped.push('shading')
   if (locks.accents && hasAccent) skipped.push('accents')
@@ -492,14 +525,14 @@ export function applyPlanetStyle(doc: PlanetDoc, style: PlanetStyle): PlanetStyl
   }
 
   return {
-    doc: { ...doc, planet: locks.planet ? doc.planet : plan.planet(doc.planet), layers },
+    doc: { ...doc, orb: locks.orb ? doc.orb : plan.orb(doc.orb), layers },
     skipped,
   }
 }
 
 /** Best-effort read of which style the current document resembles. */
-export function detectPlanetStyle(doc: PlanetDoc): PlanetStyle | 'custom' {
-  if (doc.planet.mode === 'sliced') return 'sliced-sweep'
+export function detectOrbStyle(doc: OrbDoc): OrbStyle | 'custom' {
+  if (doc.orb.mode === 'sliced') return 'sliced-sweep'
   const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
   const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
   // Flat mode suppresses shading at render time, so a document that only differs
@@ -509,9 +542,9 @@ export function detectPlanetStyle(doc: PlanetDoc): PlanetStyle | 'custom' {
   if (patterns.length === 0) return shaded ? 'shaded-sphere' : 'flat-disc'
   // Only call it overlap-bloom when every visible pattern is lens-confined;
   // a mix of full-disc ink and one lens patch is its own thing.
-  if (patterns.every((p) => p.mask?.mode !== 'planet' && (p.mask?.feather ?? 0) > 0.2)) {
+  if (patterns.every((p) => p.mask?.mode !== 'orb' && (p.mask?.feather ?? 0) > 0.2)) {
     return 'overlap-bloom'
   }
-  if (patterns.every((p) => (p.mask?.mode ?? 'planet') === 'planet')) return 'patterned-disc'
+  if (patterns.every((p) => (p.mask?.mode ?? 'orb') === 'orb')) return 'patterned-disc'
   return 'custom'
 }

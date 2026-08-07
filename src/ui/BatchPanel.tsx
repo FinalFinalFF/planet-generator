@@ -2,20 +2,20 @@
  * Batch mode: an N-up grid of seeded remixes from the current settings, so a
  * run can be cherry-picked rather than stepped through one Remix at a time.
  *
- * Each cell is a real `PlanetSvg`, which is what lets "export all" serialize the
+ * Each cell is a real `OrbSvg`, which is what lets "export all" serialize the
  * live nodes exactly like the single-file export does.
  */
 
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import type { Palette, PlanetDoc } from '../types'
-import { PlanetSvg } from '../render/PlanetSvg'
+import type { Palette, OrbDoc } from '../types'
+import { OrbSvg } from '../render/OrbSvg'
 import { pickPalette, remix } from '../lib/remix'
 import { paletteById } from '../lib/palettes'
 import type { ParsedPattern } from '../lib/patterns/parse'
 import { Check, Segmented } from './controls'
 
 export type BatchPanelProps = {
-  doc: PlanetDoc
+  doc: OrbDoc
   palettes: Palette[]
   parsedById: Map<string, ParsedPattern>
   available: ParsedPattern[]
@@ -26,13 +26,13 @@ export type BatchPanelProps = {
   onFormatChange: (f: 'svg' | 'png' | 'both') => void
   onPngSizeChange: (n: number) => void
   onClose: () => void
-  onPromote: (doc: PlanetDoc) => void
+  onPromote: (doc: OrbDoc) => void
   onExportAll: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
 }
 
 export type BatchCell = {
   seed: string
-  doc: PlanetDoc
+  doc: OrbDoc
   palette: Palette
 }
 
@@ -56,12 +56,12 @@ const BatchCellView = memo(function BatchCellView({
   cell: BatchCell
   parsedById: Map<string, ParsedPattern>
   onNode: (seed: string, el: SVGSVGElement | null) => void
-  onPromote: (doc: PlanetDoc) => void
+  onPromote: (doc: OrbDoc) => void
 }) {
   const ref = useCallback((el: SVGSVGElement | null) => onNode(cell.seed, el), [cell.seed, onNode])
   return (
     <figure className="batch__cell">
-      <PlanetSvg
+      <OrbSvg
         doc={cell.doc}
         palette={cell.palette}
         parsedById={parsedById}

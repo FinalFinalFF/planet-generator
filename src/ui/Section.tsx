@@ -24,7 +24,7 @@ function RandomizeIcon() {
  * A section lock freezes that section's *values*. Colors are palette-slot
  * references, so swapping the palette still recolors a locked section — that is
  * what the Palette (colors) lock is for. Saying so on the control itself is the
- * only place a user will look when a locked planet visibly changes color.
+ * only place a user will look when a locked orb visibly changes color.
  */
 function lockTitle(section: LockSection, on: boolean): string {
   if (section === 'colors') {

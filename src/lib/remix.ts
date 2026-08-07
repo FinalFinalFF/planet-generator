@@ -22,8 +22,8 @@ import {
   type AccentLayer,
   type Background,
   type LayerMask,
-  type Planet,
-  type PlanetMode,
+  type Orb,
+  type OrbMode,
   type SliceConfig,
   type BlendMode,
   type ColorRef,
@@ -34,7 +34,7 @@ import {
   type Locks,
   type Palette,
   type PatternLayer,
-  type PlanetDoc,
+  type OrbDoc,
   type ShadingLayer,
 } from '../types'
 import { makeRng, type Rng } from './rng'
@@ -76,7 +76,7 @@ function dealRamp(rng: Rng, palette: Palette, count: number): number[] {
 
   // Contiguous and non-wrapping: a run that wraps past the light end back into
   // the dark slots can come out entirely dark, which reads as a black hole
-  // against a dark background rather than as a planet.
+  // against a dark background rather than as a orb.
   let start = rng.int(0, Math.max(0, len - n))
   // And make sure it reaches the light end, so there is somewhere for the
   // shading highlight to land.
@@ -197,10 +197,10 @@ function remixPatternLayer(
       : dealtColors
 
   // Most layers cover the whole disc; a minority get a feathered lens so
-  // textures sometimes meet in patches instead of always blanketing the planet.
-  const maskMode = rng.weighted(['planet', 'lens', 'outside-lens'] as const, [0.6, 0.24, 0.16])
+  // textures sometimes meet in patches instead of always blanketing the orb.
+  const maskMode = rng.weighted(['orb', 'lens', 'outside-lens'] as const, [0.6, 0.24, 0.16])
   const mask: LayerMask =
-    maskMode === 'planet'
+    maskMode === 'orb'
       ? { ...DEFAULT_LAYER_MASK }
       : {
           mode: maskMode,
@@ -312,7 +312,7 @@ export function pickPalette(palettes: Palette[], seed: string, current: string):
   return rng.pick(pool)
 }
 
-export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc {
+export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const rng = makeRng(seed)
   const { locks } = doc
   const palette = deps.palette
@@ -353,7 +353,7 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
     vignette: bgVignette,
   }
 
-  // --- planet candidate ---
+  // --- orb candidate ---
   const sliced = rng.bool(0.22)
   const slices: SliceConfig = {
     ...DEFAULT_SLICES,
@@ -372,29 +372,29 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
       [0.42, 0.28, 0.18, 0.12],
     ),
   }
-  const planetCx = rng.float(0.45, 0.55)
-  const planetCy = rng.float(0.45, 0.55)
-  const planetRadius = rng.float(0.5, 0.74)
-  const planetGradient = remixGradient(rng, palette, doc.planet.gradient, locks.colors)
+  const orbCx = rng.float(0.45, 0.55)
+  const orbCy = rng.float(0.45, 0.55)
+  const orbRadius = rng.float(0.5, 0.74)
+  const orbGradient = remixGradient(rng, palette, doc.orb.gradient, locks.colors)
   // Short-circuits on `sliced`, which is itself a draw — so the stream still
   // depends only on the seed, never on a lock.
   const strokeEnabled = !sliced && rng.bool(0.18)
   const strokeWidth = rng.float(1, 4)
   const strokeOpacity = rng.float(0.25, 0.7)
-  const planetCandidate: Planet = {
-    ...doc.planet,
+  const orbCandidate: Orb = {
+    ...doc.orb,
     visible: true,
-    mode: (sliced ? 'sliced' : 'disc') as PlanetMode,
+    mode: (sliced ? 'sliced' : 'disc') as OrbMode,
     slices,
-    cx: planetCx,
-    cy: planetCy,
-    radius: planetRadius,
-    gradient: planetGradient,
+    cx: orbCx,
+    cy: orbCy,
+    radius: orbRadius,
+    gradient: orbGradient,
     stroke: {
-      ...doc.planet.stroke,
+      ...doc.orb.stroke,
       enabled: strokeEnabled,
       width: strokeWidth,
-      color: locks.colors ? doc.planet.stroke.color : { slot: deck.light[0] },
+      color: locks.colors ? doc.orb.stroke.color : { slot: deck.light[0] },
       opacity: strokeOpacity,
     },
   }
@@ -411,11 +411,11 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
         ? prevPatterns.length
         : rolledCount
 
-  // A slice lattice already carries the whole planet; heavy texture and a
-  // terminator on top of it just read as mud. Taken from the *selected* planet,
-  // so a locked disc planet keeps its textures — hence the roll below is
+  // A slice lattice already carries the whole orb; heavy texture and a
+  // terminator on top of it just read as mud. Taken from the *selected* orb,
+  // so a locked disc orb keeps its textures — hence the roll below is
   // unconditional while its use is not.
-  const slicedNow = (locks.planet ? doc.planet : planetCandidate).mode === 'sliced'
+  const slicedNow = (locks.orb ? doc.orb : orbCandidate).mode === 'sliced'
 
   const patternCandidates: PatternLayer[] = Array.from({ length: patternCount }, (_, i) => {
     const layer = remixPatternLayer(rng, deps, prevPatterns[i], locks.colors)
@@ -435,7 +435,7 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
 
   // --- apply the locks ---
   const background = locks.background ? doc.background : backgroundCandidate
-  const planet = locks.planet ? doc.planet : planetCandidate
+  const orb = locks.orb ? doc.orb : orbCandidate
   const patterns = locks.patterns ? prevPatterns : patternCandidates
   const shading = locks.shading ? (prevShading ?? null) : shadingCandidate
   const accents = locks.accents ? (prevAccents ?? null) : accentsCandidate
@@ -502,7 +502,7 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
     }
   }
 
-  return { ...doc, seed, background, planet, layers }
+  return { ...doc, seed, background, orb, layers }
 }
 
 /**
@@ -515,16 +515,16 @@ export function remix(doc: PlanetDoc, seed: string, deps: RemixDeps): PlanetDoc 
  * otherwise would make the seed a lie.
  */
 export function remixSection(
-  doc: PlanetDoc,
+  doc: OrbDoc,
   section: Exclude<LockSection, 'colors'>,
   seed: string,
   deps: RemixDeps,
-): PlanetDoc {
+): OrbDoc {
   if (doc.locks[section]) return doc // the lock wins
   const inverted: Locks = {
     colors: true,
     background: true,
-    planet: true,
+    orb: true,
     patterns: true,
     shading: true,
     accents: true,
@@ -539,7 +539,7 @@ export function remixSection(
  * Respects the `colors` lock: a lock is absolute, so this is a no-op while
  * colors are frozen.
  */
-export function shuffleColors(doc: PlanetDoc, palette: Palette, seed: string): PlanetDoc {
+export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbDoc {
   if (doc.locks.colors) return doc // the lock wins
   const rng = makeRng(seed)
   const deck = buildDeck(palette)
@@ -560,10 +560,10 @@ export function shuffleColors(doc: PlanetDoc, palette: Palette, seed: string): P
     },
   }
 
-  const planet = {
-    ...doc.planet,
-    gradient: { ...doc.planet.gradient, stops: rampFor(doc.planet.gradient.stops, false) },
-    stroke: { ...doc.planet.stroke, color: { ...doc.planet.stroke.color, slot: deck.light[0] } },
+  const orb = {
+    ...doc.orb,
+    gradient: { ...doc.orb.gradient, stops: rampFor(doc.orb.gradient.stops, false) },
+    stroke: { ...doc.orb.stroke, color: { ...doc.orb.stroke.color, slot: deck.light[0] } },
   }
 
   const layers: Layer[] = doc.layers.map((layer) => {
@@ -611,5 +611,5 @@ export function shuffleColors(doc: PlanetDoc, palette: Palette, seed: string): P
     }
   })
 
-  return { ...doc, background, planet, layers }
+  return { ...doc, background, orb, layers }
 }

@@ -14,7 +14,7 @@ import {
   type LayerMask,
   type Palette,
   type PatternLayer,
-  type PlanetDoc,
+  type OrbDoc,
   type ShadingLayer,
 } from '../types'
 import { DEFAULT_LAYER_MASK } from '../lib/defaults'
@@ -33,8 +33,8 @@ import {
 import { recolor, resolveTokens, type GroupPaint } from '../lib/patterns/registry'
 import type { ParsedPattern } from '../lib/patterns/parse'
 
-export type PlanetSvgProps = {
-  doc: PlanetDoc
+export type OrbSvgProps = {
+  doc: OrbDoc
   palette: Palette
   parsedById: Map<string, ParsedPattern>
   /** Suppress the background layer (used by the transparent export path). */
@@ -46,11 +46,11 @@ export type PlanetSvgProps = {
 }
 
 type Ctx = {
-  doc: PlanetDoc
+  doc: OrbDoc
   palette: Palette
   parsedById: Map<string, ParsedPattern>
   prefix: string
-  /** Planet center + radius in user units. */
+  /** Orb center + radius in user units. */
   cx: number
   cy: number
   r: number
@@ -189,16 +189,16 @@ function ConicSweep({
 /* ---------- sliced sphere ---------- */
 
 /**
- * Concentric bands about a focus outside the planet: drawn largest first, so
+ * Concentric bands about a focus outside the orb: drawn largest first, so
  * each smaller circle paints over the last and leaves an annulus visible. With
  * the focus off to one side those annuli read as curved bands sweeping across
  * the whole disc. The second family's focus sits `fan` degrees away, so its
  * bands cross the first family's and cut them into diamond cells.
  */
-function SlicedPlanet({ ctx }: { ctx: Ctx }) {
+function SlicedOrb({ ctx }: { ctx: Ctx }) {
   const { cx, cy, r, prefix, palette, doc } = ctx
-  const s = doc.planet.slices
-  const g = doc.planet.gradient
+  const s = doc.orb.slices
+  const g = doc.orb.gradient
   const count = clamp(Math.round(s.count), 1, 96)
   const families = s.families === 1 ? 1 : 2
   const squash = clamp(s.arc, 0.05, 3)
@@ -210,7 +210,7 @@ function SlicedPlanet({ ctx }: { ctx: Ctx }) {
     const dir = dirFromAngle(focusAngle)
     const fx = cx + dir.dx * dist
     const fy = cy + dir.dy * dist
-    // Radii derived to span the planet, so bands always reach both limbs.
+    // Radii derived to span the orb, so bands always reach both limbs.
     const rMin = Math.max(1, dist - r * 1.04)
     const rMax = dist + r * 1.04
     const out: React.ReactNode[] = []
@@ -239,7 +239,7 @@ function SlicedPlanet({ ctx }: { ctx: Ctx }) {
   // Always clipped: bands are concentric, so letting them run free just floods
   // the canvas rather than scalloping a silhouette.
   return (
-    <g clipPath={`url(#${prefix}-planet-clip)`}>
+    <g clipPath={`url(#${prefix}-orb-clip)`}>
       <g>{family(0, clamp(s.alpha, 0, 1))}</g>
       {families === 2 && (
         <g style={blendStyle(s.blend)}>{family(1, clamp(s.modulation, 0, 1))}</g>
@@ -312,7 +312,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
   const d = r * 2
   const mask = layer.mask ?? DEFAULT_LAYER_MASK
   const maskId = `${prefix}-lens-${layer.id}`
-  const useMask = mask.mode !== 'planet'
+  const useMask = mask.mode !== 'orb'
   const paints: GroupPaint[] = parsed.groups.map((g) => {
     const ref = layer.colors[g.index]
     return { hex: resolveColor(ref ?? { slot: g.index }, palette), alpha: refAlpha(ref) }
@@ -338,7 +338,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
           </defs>
         )}
         <g
-          clipPath={`url(#${prefix}-planet-clip)`}
+          clipPath={`url(#${prefix}-orb-clip)`}
           opacity={n(layer.opacity, 4)}
           style={blendStyle(layer.blend)}
         >
@@ -368,7 +368,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
         {useMask && <LensMaskDef id={maskId} mask={mask} ctx={ctx} />}
       </defs>
       <g
-        clipPath={`url(#${prefix}-planet-clip)`}
+        clipPath={`url(#${prefix}-orb-clip)`}
         opacity={n(layer.opacity, 4)}
         style={blendStyle(layer.blend)}
       >
@@ -441,8 +441,8 @@ function ShadingLayerView({ layer, ctx }: { layer: ShadingLayer; ctx: Ctx }) {
         </radialGradient>
       </defs>
       {/* No group opacity: that would isolate the group and stop these from
-          blending against the planet underneath. */}
-      <g clipPath={`url(#${prefix}-planet-clip)`} style={blendStyle(layer.blend)}>
+          blending against the orb underneath. */}
+      <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(layer.blend)}>
         {sAmt > 0.001 && (
           <circle
             cx={n(cx)}
@@ -547,7 +547,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
       })}
 
       {showRim && (
-        <g clipPath={`url(#${prefix}-planet-clip)`} style={blendStyle(rim.blend)}>
+        <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(rim.blend)}>
           <path
             d={crescentPath(cx, cy, r, rim.angle, -Math.max(0.001, rim.width) * r)}
             fillRule="evenodd"
@@ -615,7 +615,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
       )}
       {/*
        * The vignette survives flat mode. It darkens the canvas corners, not the
-       * planet: it is a background treatment that would look the same behind a
+       * orb: it is a background treatment that would look the same behind a
        * square, so it never implies a sphere. Flat mode suppresses sphere
        * shading, not every soft gradient in the document.
        */}
@@ -649,7 +649,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
 
 /* ---------- root ---------- */
 
-export function PlanetSvg({
+export function OrbSvg({
   doc,
   palette,
   parsedById,
@@ -658,18 +658,18 @@ export function PlanetSvg({
   svgRef,
   className,
   style,
-}: PlanetSvgProps) {
+}: OrbSvgProps) {
   const { width, height } = doc.canvas
   const canvas: Box = { x: 0, y: 0, w: width, h: height }
   const minSide = Math.min(width, height)
-  const cx = doc.planet.cx * width
-  const cy = doc.planet.cy * height
-  const r = Math.max(1, (doc.planet.radius * minSide) / 2)
-  const planetBox: Box = { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }
+  const cx = doc.orb.cx * width
+  const cy = doc.orb.cy * height
+  const r = Math.max(1, (doc.orb.radius * minSide) / 2)
+  const orbBox: Box = { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }
 
   const ctx: Ctx = { doc, palette, parsedById, prefix: idPrefix, cx, cy, r, canvas }
-  const clipId = `${idPrefix}-planet-clip`
-  const planetGradId = `${idPrefix}-planet-grad`
+  const clipId = `${idPrefix}-orb-clip`
+  const orbGradId = `${idPrefix}-orb-grad`
   const showBackground = !transparent && doc.background.kind !== 'transparent'
 
   return (
@@ -695,14 +695,14 @@ export function PlanetSvg({
         </g>
       )}
 
-      {doc.planet.visible && doc.planet.mode === 'sliced' && <SlicedPlanet ctx={ctx} />}
+      {doc.orb.visible && doc.orb.mode === 'sliced' && <SlicedOrb ctx={ctx} />}
 
-      {doc.planet.visible && doc.planet.mode !== 'sliced' && (
+      {doc.orb.visible && doc.orb.mode !== 'sliced' && (
         <Fragment>
-          {doc.planet.gradient.type === 'conic' ? (
+          {doc.orb.gradient.type === 'conic' ? (
             <ConicSweep
-              gradient={doc.planet.gradient}
-              box={planetBox}
+              gradient={doc.orb.gradient}
+              box={orbBox}
               palette={palette}
               clipId={clipId}
             />
@@ -710,13 +710,13 @@ export function PlanetSvg({
             <Fragment>
               <defs>
                 <GradientDef
-                  id={planetGradId}
-                  gradient={doc.planet.gradient}
-                  box={planetBox}
+                  id={orbGradId}
+                  gradient={doc.orb.gradient}
+                  box={orbBox}
                   palette={palette}
                 />
               </defs>
-              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${planetGradId})`} />
+              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${orbGradId})`} />
             </Fragment>
           )}
         </Fragment>
@@ -731,22 +731,22 @@ export function PlanetSvg({
           // Flat mode outranks the layer's own `visible` and any composition
           // style that set it — suppressed here rather than by rewriting the
           // layer, so the user's shading settings survive toggling flat off.
-          return doc.planet.visible && !doc.flat ? (
+          return doc.orb.visible && !doc.flat ? (
             <ShadingLayerView key={layer.id} layer={layer} ctx={ctx} />
           ) : null
         }
         return <AccentLayerView key={layer.id} layer={layer} ctx={ctx} />
       })}
 
-      {doc.planet.visible && doc.planet.stroke.enabled && (
+      {doc.orb.visible && doc.orb.stroke.enabled && (
         <circle
           cx={n(cx)}
           cy={n(cy)}
           r={n(r)}
           fill="none"
-          stroke={resolveColor(doc.planet.stroke.color, palette)}
-          strokeWidth={n(Math.max(0.1, doc.planet.stroke.width))}
-          strokeOpacity={n(clamp(doc.planet.stroke.opacity, 0, 1), 4)}
+          stroke={resolveColor(doc.orb.stroke.color, palette)}
+          strokeWidth={n(Math.max(0.1, doc.orb.stroke.width))}
+          strokeOpacity={n(clamp(doc.orb.stroke.opacity, 0, 1), 4)}
         />
       )}
     </svg>

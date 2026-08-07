@@ -1,7 +1,7 @@
 /** Document state with coalescing undo/redo and debounced persistence. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PlanetDoc } from '../types'
+import type { OrbDoc } from '../types'
 import { saveDoc } from '../lib/storage'
 
 const HISTORY_LIMIT = 80
@@ -9,9 +9,9 @@ const COALESCE_MS = 700
 const SAVE_DEBOUNCE_MS = 350
 
 type History = {
-  past: PlanetDoc[]
-  present: PlanetDoc
-  future: PlanetDoc[]
+  past: OrbDoc[]
+  present: OrbDoc
+  future: OrbDoc[]
 }
 
 export type CommitOptions = {
@@ -25,17 +25,17 @@ export type CommitOptions = {
 }
 
 export type DocApi = {
-  doc: PlanetDoc
-  update: (recipe: (draft: PlanetDoc) => PlanetDoc, opts?: CommitOptions) => void
-  replace: (next: PlanetDoc, opts?: CommitOptions) => void
+  doc: OrbDoc
+  update: (recipe: (draft: OrbDoc) => OrbDoc, opts?: CommitOptions) => void
+  replace: (next: OrbDoc, opts?: CommitOptions) => void
   undo: () => void
   redo: () => void
   canUndo: boolean
   canRedo: boolean
-  resetHistory: (next: PlanetDoc) => void
+  resetHistory: (next: OrbDoc) => void
 }
 
-export function useDoc(initial: PlanetDoc): DocApi {
+export function useDoc(initial: OrbDoc): DocApi {
   const [history, setHistory] = useState<History>({ past: [], present: initial, future: [] })
   const lastCommit = useRef<{ key: string; at: number } | null>(null)
 
@@ -60,7 +60,7 @@ export function useDoc(initial: PlanetDoc): DocApi {
   }, [])
 
   const replace = useCallback(
-    (next: PlanetDoc, opts: CommitOptions = {}) => {
+    (next: OrbDoc, opts: CommitOptions = {}) => {
       // Committed before the updater runs, so a `next === h.present` no-op below
       // still refreshes the coalesce window. Harmless: a commit that changes
       // nothing has nothing to undo.
@@ -76,7 +76,7 @@ export function useDoc(initial: PlanetDoc): DocApi {
   )
 
   const update = useCallback(
-    (recipe: (draft: PlanetDoc) => PlanetDoc, opts: CommitOptions = {}) => {
+    (recipe: (draft: OrbDoc) => OrbDoc, opts: CommitOptions = {}) => {
       const coalesce = beginCommit(opts)
       setHistory((h) => {
         // The recipe stays inside the updater: it is pure and needs fresh state.
@@ -112,7 +112,7 @@ export function useDoc(initial: PlanetDoc): DocApi {
     })
   }, [])
 
-  const resetHistory = useCallback((next: PlanetDoc) => {
+  const resetHistory = useCallback((next: OrbDoc) => {
     lastCommit.current = null
     setHistory({ past: [], present: next, future: [] })
   }, [])

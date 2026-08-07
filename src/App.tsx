@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DOC_VERSION, type Palette, type PlanetDoc, type Preset } from './types'
-import { PlanetSvg } from './render/PlanetSvg'
+import { DOC_VERSION, type Palette, type OrbDoc, type Preset } from './types'
+import { OrbSvg } from './render/OrbSvg'
 import { Header } from './ui/Header'
 import { Sidebar } from './ui/Sidebar'
 import { Stage } from './ui/Stage'
 import { useDoc } from './state/useDoc'
 import { BUILTIN_PALETTES, newPaletteId, paletteById } from './lib/palettes'
 import {
-  applyPlanetStyle,
+  applyOrbStyle,
   DEFAULT_PATTERN_IDS,
   defaultDoc,
   defaultPatternColors,
   makePatternLayer,
 } from './lib/defaults'
-import { PLANET_STYLE_LABELS, type LockSection, type PlanetStyle } from './types'
+import { ORB_STYLE_LABELS, type LockSection, type OrbStyle } from './types'
 import { randomSeed } from './lib/rng'
 import { pickPalette, remix, remixSection, shuffleColors } from './lib/remix'
 import {
@@ -30,7 +30,7 @@ import type { ParsedPattern } from './lib/patterns/parse'
 import {
   downloadBlob,
   downloadText,
-  planetFilename,
+  orbFilename,
   rasterizeSvg,
   serializeSvg,
 } from './lib/export'
@@ -41,7 +41,7 @@ import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 const SECTION_KEYS = [
   'canvas',
   'background',
-  'planet',
+  'orb',
   'layers',
   'shading',
   'accents',
@@ -52,7 +52,7 @@ const SECTION_KEYS = [
 const DEFAULT_OPEN: Record<string, boolean> = {
   canvas: false,
   background: false,
-  planet: true,
+  orb: true,
   layers: true,
   shading: false,
   accents: false,
@@ -66,7 +66,7 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null)
   const [parsedById, setParsedById] = useState<Map<string, ParsedPattern>>(new Map())
 
-  const [initial] = useState<PlanetDoc>(() => storage.loadDoc() ?? defaultDoc(randomSeed()))
+  const [initial] = useState<OrbDoc>(() => storage.loadDoc() ?? defaultDoc(randomSeed()))
   const { doc, update: rawUpdate, replace, undo, redo, canUndo, canRedo } = useDoc(initial)
 
   const [palettes, setPalettes] = useState<Palette[]>(() => [
@@ -111,7 +111,7 @@ export default function App() {
   }, [])
 
   const update = useCallback(
-    (recipe: (d: PlanetDoc) => PlanetDoc, coalesce?: string) => rawUpdate(recipe, { coalesce }),
+    (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => rawUpdate(recipe, { coalesce }),
     [rawUpdate],
   )
 
@@ -322,17 +322,17 @@ export default function App() {
     [ingest, palette, rawUpdate, notify],
   )
 
-  const onApplyPlanetStyle = useCallback(
-    (style: PlanetStyle) => {
+  const onApplyOrbStyle = useCallback(
+    (style: OrbStyle) => {
       // One update() call, so the whole macro stays a single undo entry. The
       // skipped list is read off the same computation the updater applies.
       let skipped: LockSection[] = []
       rawUpdate((d) => {
-        const result = applyPlanetStyle(d, style)
+        const result = applyOrbStyle(d, style)
         skipped = result.skipped
         return result.doc
       })
-      const label = PLANET_STYLE_LABELS[style]
+      const label = ORB_STYLE_LABELS[style]
       notify(
         skipped.length > 0
           ? `Composition style: ${label} (${skipped.join(', ')} locked — left as is)`
@@ -393,11 +393,11 @@ export default function App() {
   const exportPalettes = useCallback(() => {
     const custom = palettes.filter((p) => !p.builtin)
     const payload = {
-      format: 'planetgen.palettes',
+      format: 'orbgen.palettes',
       version: 1,
       palettes: custom.length > 0 ? custom : [{ ...palette, builtin: undefined }],
     }
-    downloadText(JSON.stringify(payload, null, 2), 'planet-palettes.json', 'application/json')
+    downloadText(JSON.stringify(payload, null, 2), 'orb-palettes.json', 'application/json')
   }, [palettes, palette])
 
   const importPalettes = useCallback(
@@ -517,7 +517,7 @@ export default function App() {
     (asTransparent: boolean) => {
       const el = svgRef.current
       if (!el) return
-      downloadText(serializeSvg(el, serializeOpts(asTransparent)), planetFilename(doc.seed, 'svg'))
+      downloadText(serializeSvg(el, serializeOpts(asTransparent)), orbFilename(doc.seed, 'svg'))
       notify('SVG exported')
     },
     [doc.seed, notify, serializeOpts],
@@ -551,7 +551,7 @@ export default function App() {
           longEdge,
           transparent,
         )
-        downloadBlob(blob, planetFilename(doc.seed, 'png', `${longEdge}`))
+        downloadBlob(blob, orbFilename(doc.seed, 'png', `${longEdge}`))
         notify(`PNG exported at ${longEdge}px long edge`)
       } catch (err) {
         notify(err instanceof Error ? err.message : 'PNG export failed', true)
@@ -587,7 +587,7 @@ export default function App() {
           if (batchFormat === 'svg' || batchFormat === 'both') {
             entries.push(
               textEntry(
-                planetFilename(cell.seed, 'svg'),
+                orbFilename(cell.seed, 'svg'),
                 serializeSvg(el, { transparent, expandPatterns }),
               ),
             )
@@ -602,13 +602,13 @@ export default function App() {
             )
             // Same long-edge suffix the single-file PNG export uses.
             entries.push(
-              await blobEntry(planetFilename(cell.seed, 'png', `${batchPngSize}`), png),
+              await blobEntry(orbFilename(cell.seed, 'png', `${batchPngSize}`), png),
             )
           }
         }
         if (entries.length === 0) throw new Error('Nothing to export')
         const zip = createZip(entries)
-        downloadBlob(zip, `planet-batch-${cells[0]?.seed.split('-').slice(0, 2).join('-') ?? 'set'}.zip`)
+        downloadBlob(zip, `orb-batch-${cells[0]?.seed.split('-').slice(0, 2).join('-') ?? 'set'}.zip`)
         notify(
           `Zipped ${entries.length} file${entries.length === 1 ? '' : 's'}` +
             (missing.length > 0 ? ` — ${missing.length} cell(s) were not rendered` : ''),
@@ -624,7 +624,7 @@ export default function App() {
   )
 
   const promoteBatchCell = useCallback(
-    (next: PlanetDoc) => {
+    (next: OrbDoc) => {
       replace(next)
       setBatchOpen(false)
       notify(`Promoted ${next.seed}`)
@@ -741,7 +741,7 @@ export default function App() {
         onZoomChange={(zoom) => setUi((u) => ({ ...u, zoom }))}
         onFitChange={(fitToStage) => setUi((u) => ({ ...u, fitToStage }))}
       >
-        <PlanetSvg
+        <OrbSvg
           doc={doc}
           palette={palette}
           parsedById={parsedById}
@@ -762,7 +762,7 @@ export default function App() {
         update={update}
         onAddPatternLayer={onAddPatternLayer}
         onSetLayerPattern={onSetLayerPattern}
-        onApplyPlanetStyle={onApplyPlanetStyle}
+        onApplyOrbStyle={onApplyOrbStyle}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}
         patternOptions={patternOptions}

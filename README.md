@@ -1,6 +1,6 @@
-# Planet Generator
+# Orb Generator
 
-Client-side brand-graphics generator for "planet" discs: layered gradients and
+Client-side brand-graphics generator for "orb" discs: layered gradients and
 geometric patterns clipped to a circle. Vite + React + TypeScript, no backend.
 
 **Live: https://finalfinalff.github.io/planet-generator/**
@@ -45,7 +45,7 @@ Everything else is verified by driving headless Chrome; see CLAUDE.md.
 ## How it renders
 
 A single inline `<svg>` element is the source of truth. Everything — background,
-planet gradient, pattern layers, shading, accents — is real SVG, so **SVG export
+orb gradient, pattern layers, shading, accents — is real SVG, so **SVG export
 is a direct serialization of that live node**. Canvas is used only to rasterize
 PNGs at export time.
 
@@ -154,8 +154,8 @@ light thirds the remix deck splits on all exist.
 
 ## Composition styles
 
-The **Composition style** dropdown at the top of the Planet section applies a recipe
-that rewrites the planet mode, the shading, and which layers are visible
+The **Composition style** dropdown at the top of the Orb section applies a recipe
+that rewrites the orb mode, the shading, and which layers are visible
 together — the looks in the reference material are combinations, not single
 settings. Palette, canvas, seed and pattern choices are left alone, **locked
 sections are skipped** (the toast names them), and the whole thing is one undo step.
@@ -194,10 +194,10 @@ section header reads `flat`. It is not a lock, so it lives outside `doc.locks`.
 ### Sliced sweep
 
 A family is a set of concentric circles about a focus sitting *outside* the
-planet, drawn largest first so each smaller circle paints over the last. What
+orb, drawn largest first so each smaller circle paints over the last. What
 stays visible of each is an annulus, and because the focus is off to one side
 those annuli read as curved bands sweeping across the disc. Band radii are
-derived from the focus distance so they always span the planet exactly — there is
+derived from the focus distance so they always span the orb exactly — there is
 no radius control to get wrong.
 
 A second family with a focus `fan` degrees away is laid over translucently, and
@@ -211,7 +211,7 @@ Two things are load-bearing:
 - **Multiply, not screen, for the lattice.** Screen washes the whole disc toward
   white and loses the base hues.
 
-`curvature` is the focus distance in planet radii: near 1 the bands curve hard,
+`curvature` is the focus distance in orb radii: near 1 the bands curve hard,
 larger values flatten them toward straight stripes. Slices are always clipped to
 the circle — concentric bands have no scalloped silhouette to gain by running
 free, they just flood the canvas.
@@ -219,11 +219,11 @@ free, they just flood the canvas.
 ## Layers
 
 The stack is ordered and reorderable: pattern layers, sphere shading, and
-accents, painted bottom to top. Background sits below the stack and the planet
+accents, painted bottom to top. Background sits below the stack and the orb
 base gradient directly above it — reordering either above the pattern layers
 would only hide them, so they are fixed. Accents are *not* clipped to the
 circle, so dragging an accent layer below the pattern layers puts a ring behind
-the planet.
+the orb.
 
 Each pattern layer also has an **overlap region**: `whole disc`, `lens` (the
 intersection with an offset circle) or `outside lens`, with a `feather` for a
@@ -242,7 +242,7 @@ exactly — including which palette **Remix All** picked.
 | **Remix All** (`⇧R`) | Everything, including switching to a random palette |
 | **Remix** (`R`) | Everything except the palette |
 | **Shuffle colors** (`S`) | Re-deals palette slots, touching no geometry |
-| Per-section ⟳ | That section only — Background, Planet, Layers, Shading, Accents |
+| Per-section ⟳ | That section only — Background, Orb, Layers, Shading, Accents |
 | Palette ⟳ | Switches to a random palette, changing nothing else |
 | **Batch** (`B`) | An N-up grid of remixes to cherry-pick from |
 
@@ -262,7 +262,7 @@ reproducible and *Regenerate* is just a new batch seed. **Vary palette** gives
 each cell its own palette, and is disabled while colors are locked.
 
 **Export all (zip)** writes every cell as SVG, PNG, or both. Each cell is a real
-`PlanetSvg`, and the export serializes those live nodes — the same path the
+`OrbSvg`, and the export serializes those live nodes — the same path the
 single-file export uses — so a file from a batch is identical to promoting that
 cell and exporting it on its own.
 
@@ -294,12 +294,15 @@ transparent-background toggle as the Export panel.
 ## Persistence
 
 Document, custom palettes, named presets, and UI preferences live in
-localStorage under `planetgen.*`, along with imported patterns. Every read is
-defensive and falls back to the shipped default on bad data.
+localStorage under `orbgen.*`, along with imported patterns. Every read is
+defensive and falls back to the shipped default on bad data. These keys were
+`planetgen.*` before the rename; reads fall through to the old key and copy
+forward, so nothing saved under the old name is lost.
 
-Documents are at `DOC_VERSION` 2. Older ones are **migrated** by `normalizeDoc`
+Documents are at `DOC_VERSION` 3. Older ones are **migrated** by `normalizeDoc`
 rather than discarded, which matters because presets store whole documents — a
-preset saved before the sliced mode existed still loads.
+preset saved before the sliced mode existed still loads, as does one saved back
+when the field was called `planet` instead of `orb`.
 
 ## UI
 
