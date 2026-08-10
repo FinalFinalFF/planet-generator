@@ -319,6 +319,130 @@ position as well as contents, and why the accent roll survives as a
 move-only-when-unlocked selection.
 ```
 
+## Prompt 8 — Diagnose and fix the UI freeze (measure first, then fix)
+
+```
+The app has become slow enough to freeze the browser for multiple seconds.
+Diagnose before fixing — instrument, reproduce, and let the profile decide
+which of the fixes below to apply. Do not apply all of them speculatively.
+
+STEP 1 — Instrument. Add temporary dev-only instrumentation (strip it before
+finishing): a PerformanceObserver for `longtask` logging duration + a counter;
+performance.mark/measure around (a) resolveTokens+recolor per pattern layer in
+PatternLayerView, (b) the BatchPanel `cells` useMemo, (c) remix(). Log DOM
+node count (document.querySelectorAll('*').length) after render. Reproduce
+with: slider drags on planet gradient + a layer color, Remix All spam, the
+batch panel open at 5×5, and again after `npm run build && npm run preview`
+(StrictMode double-render only exists in dev — report the dev/prod delta).
+Also list imported patterns and their template sizes
+(listImported().map(p => p.raw.length)) — a dropped 500 KB SVG explains a lot
+and lives only in localStorage, not the repo.
+
+STEP 2 — Fix what the profile implicates, in this order of likelihood:
+
+A. Recolor/innerHTML churn. Every PlanetSvg render re-runs resolveTokens +
+   recolor for every pattern layer (templates run up to ~330 KB), and any
+   change in the produced string makes the browser re-parse that entire SVG
+   subtree via dangerouslySetInnerHTML. During a color/opacity slider drag
+   that is per-frame. Fix: memoize the markup per layer with useMemo keyed on
+   (parsed, layer.colors, layer.blend if it feeds colors, namespace), and
+   split PatternLayerView into a React.memo component so unrelated doc edits
+   (planet gradient, shading) don't recompute pattern markup at all. Cache
+   resolveTokens output on the ParsedPattern per colors-JSON key if the
+   profile still shows recolor time. This must not change output — same
+   string, computed less often. The single-<svg>-source-of-truth invariant is
+   untouched by memoization.
+
+B. Batch panel cost. 9–25 full-fidelity PlanetSvg cells recompute and
+   re-render on every doc/palette change while open, and the panel toggles on
+   the bare "B" key so it may be open by accident. Fixes: (1) memoize cells
+   per (batchSeed, cols, varyPalette, doc, palettes) — already a useMemo, but
+   verify the doc identity isn't churning per keystroke via transient updates;
+   (2) render cells lazily with content-visibility: auto or an
+   IntersectionObserver; (3) pause cell re-render entirely while the main doc
+   is mid-drag. DO NOT degrade cell rendering fidelity (fewer conic segments,
+   simplified patterns): batch export serializes those live nodes, and cells
+   must stay byte-identical to a promoted-then-exported document.
+
+C. Import weight. If a very large imported pattern is implicated, add a
+   parse-time complexity note (element count) and warn on import when a file
+   exceeds ~150 KB or ~2000 elements, suggesting the user simplify it. Do not
+   auto-simplify.
+
+D. If long tasks trace to blend-mode compositing (many mix-blend-mode layers
+   over a large stage), reduce the *stage display* cost only: cap the
+   on-screen preview element size (CSS width/height of the host, not the SVG's
+   own width/height attributes or viewBox, which exports read). Verify
+   exported SVG/PNG are unchanged afterward.
+
+STEP 3 — Prove it. Before/after numbers for the same reproduction script:
+longtask count and worst duration for a 5-second slider drag, with and without
+the batch panel open, dev and prod. Screenshot the app via the headless-Chrome
+recipe to confirm nothing visual changed, and run npm test. Remove the
+instrumentation, or keep it behind `import.meta.env.DEV` if it earned its
+place. CHANGELOG entry: what the profile actually showed (name the culprit),
+what was fixed, and the before/after numbers.
+```
+
+## Prompt 9 — Flat mode: a persistent "no 3D shading" switch
+
+```
+Add a document-level "Flat mode" toggle: when on, nothing renders that creates
+the illusion of a 3D sphere, while everything genuinely graphic stays —
+linear/radial/conic gradients, patterns, rings, satellites, background,
+vignette. This is different from the "Flat disc" composition style, which is a
+one-shot macro that also hides patterns and accents. Flat mode is a standing
+constraint that coexists with any style and any remix.
+
+What counts as a depth cue (suppressed when flat):
+- the shading layer entirely: terminator shadow, highlight, contact shadow
+- the accent layer's RIM LIGHT (the crescent along the lit limb) — it lives in
+  Accents but it is a 3D cue; rings and satellites are graphic and stay
+- nothing else: gradients of any type are fine, vignette stays (it's a
+  background treatment, not sphere shading — note this choice in the code)
+
+Model: add `flat: boolean` to PlanetDoc. Default false; add it to normalizeDoc
+so old docs and presets load. It is not a lock — keep it out of doc.locks.
+
+Renderer (PlanetSvg): when doc.flat, skip ShadingLayerView and skip the rim
+crescent (but still render the accent layer's rings/satellites). Suppress at
+render, don't mutate layer data — the user's shading settings must survive
+toggling flat off. The layer still exports correctly because export serializes
+the live SVG, which simply doesn't contain the suppressed nodes.
+
+Remix: flat mode must hold across Remix/Remix All. Per the RNG invariant, do
+NOT skip any draws — remixShading and the rim draws still run; apply flat as a
+pure selection afterward (shading candidate kept but it renders suppressed
+anyway; rim.enabled forced false in the *rendered* output is already handled
+by the renderer, so remix needs no special casing at all if suppression is
+render-side only — verify that conclusion and prefer it, since it keeps one
+mechanism). Same for applyPlanetStyle: styles may set shading visible: true;
+that's fine, flat just outranks it at render time.
+
+UI:
+- A "Flat mode" toggle placed in the Shading section header area (visible even
+  when the section is collapsed) or next to Composition style — pick whichever
+  reads better in the existing chrome, keep it one control.
+- When flat is on, show the shading section's controls disabled with a one-line
+  note ("Flat mode — shading suppressed"), and the rim controls likewise. Same
+  pattern the locks use for inert controls.
+- detectPlanetStyle: when doc.flat, a doc whose only difference from
+  'shaded-sphere' is suppressed shading should NOT report shaded-sphere; take
+  flat into account (simplest: treat shading as invisible in the detector when
+  flat).
+
+Tests: extend the remix suite — with flat on, remix N seeds and assert the
+rendered doc still has flat true and that toggling flat is the only change
+needed to restore shading (layer data untouched). Keyboard: no new shortcut.
+
+Verify in the dev server: build a shaded planet with rim + rings, toggle Flat
+mode → terminator/highlight/rim disappear, rings/satellites/patterns/gradients
+stay; Remix All several times → nothing shaded comes back; toggle off →
+original shading returns exactly. Export SVG+PNG in flat mode and confirm the
+files contain no shading/rim geometry. CHANGELOG entry: what counts as a depth
+cue and why suppression is render-side rather than data mutation.
+```
+
 ## Prompt 5 — Add a minimal regression test harness (run last)
 
 ```
