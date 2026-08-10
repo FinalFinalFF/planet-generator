@@ -7,7 +7,7 @@ import { luminance, normalizeHex } from './color'
  * ordering, so keep new palettes sorted the same way.
  */
 export const BUILTIN_PALETTES: Palette[] = [
-  {
+  /*{
     id: 'ember-terminator',
     name: 'Ember Terminator',
     builtin: true,
@@ -51,7 +51,7 @@ export const BUILTIN_PALETTES: Palette[] = [
     builtin: true,
     colors: ['#08150f', '#0d2b22', '#12a94e', '#e94ec7', '#9b7cf5', '#f96a4a', '#bcdcd2', '#d4e02a', '#ffffff'],
   },
-
+*/
   /*
    * Sampled from the boards in `Palettes/`. Anchor colors are read straight off
    * the source; where a reference gave fewer than ~6 tones, intermediates were
@@ -107,6 +107,107 @@ export const BUILTIN_PALETTES: Palette[] = [
     name: 'Charcoal Bloom',
     builtin: true,
     colors: ['#0d0d0d', '#0e2a46', '#1c4662', '#2a708c', '#9a5438', '#469a9a', '#d28c54', '#f0e6d8'],
+  },
+
+  /*
+   * Sampled from the gradient strip in `Palettes/Gradients/` (Frame*.svg — the
+   * PNG beside each is just a preview of the same two or three stops). The
+   * eleven frames chain end-to-end into one spectrum, so they are listed in
+   * strip order.
+   *
+   * Each gradient is sampled at six even steps, interpolated in OKLab so the
+   * run matches what the SVG actually paints. Sampling alone is not enough to
+   * make a usable palette, though: most of these strips barely move in
+   * lightness — `Frame`/`Frame-7` span 0.002 — so a straight six-slot palette
+   * has no ground to sit the orb on and no highlight, and `dealRamp` has no
+   * dark/mid/light thirds to split. So each palette also carries **derived
+   * anchors** at the ends the gradient does not reach: a near-black ground and
+   * a mid-dark below (at OKLab L 0.10 / 0.30), a near-white tint above (L 0.95),
+   * each keeping the neighbouring sample's hue at reduced chroma. Gradients
+   * that already reach an end get no anchor there — `Frame-9`/`Frame-10` run
+   * dark on their own, so they take only a ground.
+   *
+   * The sampled hexes are the palette's identity; the anchors exist to make it
+   * function. If a strip is ever re-exported, re-derive both together.
+   */
+  {
+    // Palettes/Gradients/Frame.svg — #E0DDDD → #CDE0FD.
+    id: 'paper-sky',
+    name: 'Paper Sky',
+    builtin: true,
+    colors: ['#030303', '#2f2d2d', '#e0dddd', '#dcdee4', '#d9deea', '#d5dff0', '#d1dff7', '#cde0fd'],
+  },
+  {
+    // Palettes/Gradients/Frame-1.svg — #CDE0FD → #B08ADA.
+    id: 'sky-lilac',
+    name: 'Sky Lilac',
+    builtin: true,
+    colors: ['#05010c', '#362448', '#b08ada', '#b69be1', '#bcace8', '#c2beef', '#c8cff6', '#cde0fd'],
+  },
+  {
+    // Palettes/Gradients/Frame-2.svg — #B08ADA → #DB4750.
+    id: 'lilac-ember',
+    name: 'Lilac Ember',
+    builtin: true,
+    colors: ['#100000', '#560f16', '#db4750', '#d45a6e', '#cc698a', '#c475a5', '#bb80c0', '#b08ada', '#f4e9ff'],
+  },
+  {
+    // Palettes/Gradients/Frame-3.svg — #DB4750 → #EA6F53.
+    id: 'ember-coral',
+    name: 'Ember Coral',
+    builtin: true,
+    colors: ['#100000', '#560f16', '#db4750', '#de5051', '#e15851', '#e46052', '#e76853', '#ea6f53', '#ffe5db'],
+  },
+  {
+    // Palettes/Gradients/Frame-4.svg — #EA6F53 → #F39530 → #FFC505.
+    id: 'coral-sunrise',
+    name: 'Coral Sunrise',
+    builtin: true,
+    colors: ['#0f0000', '#51190c', '#ea6f53', '#ee8147', '#f29235', '#f7a32a', '#fbb41e', '#ffc505', '#fdedca'],
+  },
+  {
+    // Palettes/Gradients/Frame-5.svg — #DF714C → #68F5D3. The file stacks two
+    // gradients; the second is opaque and fully covers the first, so only its
+    // stops are sampled.
+    id: 'coral-mint',
+    name: 'Coral Mint',
+    builtin: true,
+    colors: ['#0e0000', '#4e1c0a', '#df714c', '#d58f68', '#c7ab83', '#b3c49e', '#97ddb8', '#68f5d3', '#d6f7ed'],
+  },
+  {
+    // Palettes/Gradients/Frame-6.svg — #86D5B2 → #FDC513.
+    id: 'mint-gold',
+    name: 'Mint Gold',
+    builtin: true,
+    colors: ['#000502', '#103627', '#86d5b2', '#a3d39e', '#bcd188', '#d3ce6f', '#e9ca50', '#fdc513', '#fcedcb'],
+  },
+  {
+    // Palettes/Gradients/Frame-7.svg — #FFC505 → #E1C5CE.
+    id: 'gold-blush',
+    name: 'Gold Blush',
+    builtin: true,
+    colors: ['#050303', '#362a2e', '#e1c5ce', '#e7c6b5', '#edc79b', '#f3c67d', '#f9c657', '#ffc505', '#fdedca'],
+  },
+  {
+    // Palettes/Gradients/Frame-8.svg — #E1C5CE → #D893A8.
+    id: 'blush-rose',
+    name: 'Blush Rose',
+    builtin: true,
+    colors: ['#090103', '#41232d', '#d893a8', '#da9daf', '#dca7b7', '#deb1bf', '#e0bbc6', '#e1c5ce', '#f4ecee'],
+  },
+  {
+    // Palettes/Gradients/Frame-9.svg — #D893A8 → #00396C.
+    id: 'rose-navy',
+    name: 'Rose Navy',
+    builtin: true,
+    colors: ['#00030c', '#00396c', '#384c79', '#605f85', '#877091', '#af829d', '#d893a8', '#fde8ee'],
+  },
+  {
+    // Palettes/Gradients/Frame-10.svg — #436083 → #002F4B.
+    id: 'deep-navy',
+    name: 'Deep Navy',
+    builtin: true,
+    colors: ['#000408', '#002f4b', '#103856', '#1e4261', '#2a4c6c', '#375677', '#436083', '#e6f0fb'],
   },
 ]
 

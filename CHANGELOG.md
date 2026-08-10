@@ -12,6 +12,70 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: the seven hand-authored palettes are commented out
+
+`ember-terminator`, `pale-sky-brights`, `circuit-jade`, `bauhaus-signal`,
+`violet-drive`, `oxide-dust` and `signal-dark` are commented out rather than
+deleted, leaving only palettes sampled from real source material — the `Palettes/`
+boards and the gradient strip. Left in place as a block so they can come back
+without being re-derived.
+
+Two consequences to know about:
+
+- **`defaultDoc` starts on a different palette.** It reads
+  `BUILTIN_PALETTES[0].id`, not a literal, so a new document now opens on Aurora
+  Signal instead of Ember Terminator. Nothing else in `src/` refers to any
+  built-in by id string, so that is the whole blast radius.
+- **Saved documents and presets pinned to a disabled id fall back to slot 0.**
+  `paletteById` returns `palettes[0]` when the id is missing, so an old document
+  silently recolors to Aurora Signal rather than failing. Uncommenting the block
+  restores it. This is the normal cost of retiring a palette, not a bug — but it
+  is why the block is commented rather than removed.
+
+### Added: eleven palettes sampled from the gradient strip
+
+Eleven new built-ins derived from the `Frame*.svg` gradient strip (now copied to
+the untracked `Palettes/Gradients/`): Paper Sky, Sky Lilac, Lilac Ember, Ember
+Coral, Coral Sunrise, Coral Mint, Mint Gold, Gold Blush, Blush Rose, Rose Navy,
+Deep Navy. The frames chain end-to-end into one spectrum, so they are listed in
+strip order rather than sorted.
+
+Each source is only a two- or three-stop linear gradient, so turning one into a
+palette needed a decision. Sampling six even steps in OKLab gets the hues right,
+but **is not sufficient on its own**: most of these strips barely move in
+lightness — `Frame` and `Frame-7` span 0.002 in OKLab L — so a straight
+six-slot palette has no ground to sit the orb on, no highlight, and gives
+`dealRamp` no dark/mid/light thirds to split. The whole composition came out as
+one flat wash.
+
+So each palette also carries **derived anchors** at whichever end the gradient
+does not already reach: a near-black ground and a mid-dark below (L 0.10 / 0.30),
+a near-white tint above (L 0.95), each holding the neighbouring sample's hue at
+reduced chroma so the anchor reads as that palette's black rather than a generic
+one. `Frame-9`/`Frame-10` already run dark, so they take only a ground and no
+mid-dark. That is the same reasoning recorded for the earlier `Palettes/` set
+("intermediates were interpolated so the dark/mid/light thirds the remix deck
+needs all exist"), applied outward instead of inward.
+
+Two things considered and rejected:
+
+- **Sampling only, no anchors.** Faithful, but Paper Sky and Gold Blush then
+  render as a pale disc on a pale background with the orb silhouette invisible.
+  The gradients are the palette's identity; the anchors are what make it work in
+  a tool whose defaults assume a dark ground.
+- **Collapsing the near-identical samples** on the flat strips down to two or
+  three slots. Rejected because those strips still travel in *hue* even at
+  constant lightness (Gold Blush runs gold→blush), and that travel is the point.
+
+Known and accepted: on a flat strip, some remix seeds deal a ramp whose stops are
+all within ~0.002 L of each other and the orb comes out as a near-solid disc.
+That is the source gradient showing through, not a bug — a different seed deals a
+wider run.
+
+Verified with a throwaway QA route: an eleven-row contact sheet, each palette as
+its swatch strip, its default document, and a remix. All eleven produce a legible
+orb; route deleted afterwards.
+
 ### Changed: renamed "planet" to "orb" throughout (`DOC_VERSION` 3)
 
 Product rename. Everything the tool called a planet is now an orb: `PlanetDoc` →
