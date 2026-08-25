@@ -152,7 +152,18 @@ describe('a lock is absolute', () => {
     const out = shuffleColors(FIXTURE, palette, 'shuffle-seed')
     const geometry = (d: OrbDoc) =>
       json({
-        orb: { ...d.orb, gradient: { ...d.orb.gradient, stops: null }, stroke: null },
+        orb: {
+          ...d.orb,
+          gradient: { ...d.orb.gradient, stops: null },
+          stroke: null,
+          // Sector fills are colors, and shuffleColors re-deals them; the
+          // structure they hang off is the geometry that must not move.
+          sectors: {
+            angle: d.orb.sectors.angle,
+            offset: d.orb.sectors.offset,
+            cells: [d.orb.sectors.rowA.length, d.orb.sectors.rowB.length],
+          },
+        },
         canvas: d.canvas,
         patternGeometry: patterns(d).map((p) => [p.scale, p.rotation, p.offsetX, p.offsetY, p.fit]),
       })
@@ -267,6 +278,36 @@ describe('flat mode', () => {
 
   it('is not a lock: it does not appear in doc.locks', () => {
     expect(Object.keys(flat.locks)).not.toContain('flat')
+  })
+})
+
+/*
+ * Solid fills is the second standing constraint, and it holds by the same
+ * contract as flat: survives any remix, never turned on by one, and changes
+ * nothing in the document but the flag — the gradients it suppresses must
+ * come back exactly when it is toggled off.
+ */
+describe('solid fills', () => {
+  const solid: OrbDoc = { ...FIXTURE, solidFills: true }
+  const SEEDS = ['sf1', 'sf2', 'sf3', 'sf4']
+
+  it('survives remix, remixSection and shuffleColors; never turned on', () => {
+    for (const seed of SEEDS) {
+      expect(remix(solid, seed, deps).solidFills).toBe(true)
+      expect(remix(FIXTURE, seed, deps).solidFills).toBe(false)
+    }
+    for (const section of ['background', 'orb', 'patterns', 'shading', 'accents'] as const) {
+      expect(remixSection(solid, section, `sf-${section}`, deps).solidFills).toBe(true)
+    }
+    expect(shuffleColors(solid, palette, 'sf-shuffle').solidFills).toBe(true)
+  })
+
+  it('changes nothing but the flag, so toggling it off restores gradients exactly', () => {
+    for (const seed of SEEDS) {
+      const solidOut = remix(solid, seed, deps)
+      const plainOut = remix(FIXTURE, seed, deps)
+      expect(json({ ...solidOut, solidFills: false })).toBe(json(plainOut))
+    }
   })
 })
 

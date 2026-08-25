@@ -88,6 +88,210 @@ export function arcPath(
   return `M${n(p0.x)},${n(p0.y)}A${n(rx)},${n(ry)} ${n(rotation)} ${large},${dir} ${n(p1.x)},${n(p1.y)}`
 }
 
+/**
+ * An axis-aligned rect rotated about (cx, cy), emitted as an absolute path —
+ * no `transform` attribute. Sector cells use this so they need only a single
+ * clip level: Chrome mis-rasterizes *nested* clip-path intersections when the
+ * host <svg> is CSS-scaled (editor stage, batch cells), and a pre-rotated
+ * path clipped once by the orb circle sidesteps that entirely.
+ */
+export function rotatedRectPath(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  angleDeg: number,
+  cx: number,
+  cy: number,
+): string {
+  const a = angleDeg * DEG
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const pt = (x: number, y: number) => {
+    const dx = x - cx
+    const dy = y - cy
+    return `${n(cx + dx * cos - dy * sin)},${n(cy + dx * sin + dy * cos)}`
+  }
+  return `M${pt(x0, y0)}L${pt(x1, y0)}L${pt(x1, y1)}L${pt(x0, y1)}Z`
+}
+
+/**
+ * The intersection of a circle with an axis-aligned rect that has been rotated
+ * about the circle's center, as one closed path of line and arc segments.
+ *
+ * Because the rotation is about the circle's own center, the circle is
+ * invariant under it — so the intersection is computed in the unrotated frame
+ * (axis-aligned rect vs. circle) and only the resulting points are rotated
+ * into place. Sector texture cells clip to this path so they need exactly one
+ * clip level; nesting a rect clip inside the orb clip mis-rasterizes in Chrome
+ * when the host <svg> is CSS-scaled.
+ *
+ * Returns '' when the shapes do not overlap.
+ */
+export function circleRectIntersectionPath(
+  cx: number,
+  cy: number,
+  r: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  angleDeg: number,
+): string {
+  const EPS = 1e-6
+  const a = angleDeg * DEG
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const rot = (x: number, y: number) => {
+    const dx = x - cx
+    const dy = y - cy
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos }
+  }
+  const fmt = (p: { x: number; y: number }) => `${n(p.x)},${n(p.y)}`
+  const inCircle = (x: number, y: number) => (x - cx) ** 2 + (y - cy) ** 2 <= r * r + EPS
+
+  // Rect corners, walked clockwise (screen coords, y down).
+  const corners = [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ]
+
+  // Rect fully inside the circle: the rect is the intersection.
+  if (corners.every((c) => inCircle(c.x, c.y))) {
+    const p = corners.map((c) => rot(c.x, c.y))
+    return `M${fmt(p[0])}L${fmt(p[1])}L${fmt(p[2])}L${fmt(p[3])}Z`
+  }
+
+  // Circle fully inside the rect: the circle is the intersection.
+  if (cx - r >= x0 - EPS && cx + r <= x1 + EPS && cy - r >= y0 - EPS && cy + r <= y1 + EPS) {
+    return circlePath(cx, cy, r)
+  }
+
+  // Walk the rect perimeter clockwise, collecting the pieces inside the circle
+  // and the circle-crossing points in traversal order.
+  type Cross = { x: number; y: number; kind: 'exit' | 'entry' }
+  type Piece =
+    | { kind: 'line'; pts: { x: number; y: number }[] }
+    | { kind: 'gap'; from: Cross; to: Cross }
+
+  // Intersections of segment p→q with the circle, ordered along the segment.
+  const segHits = (px: number, py: number, qx: number, qy: number) => {
+    const dx = qx - px
+    const dy = qy - py
+    const fx = px - cx
+    const fy = py - cy
+    const A = dx * dx + dy * dy
+    const B = 2 * (fx * dx + fy * dy)
+    const C = fx * fx + fy * fy - r * r
+    const disc = B * B - 4 * A * C
+    if (disc <= 0 || A < EPS) return []
+    const s = Math.sqrt(disc)
+    return [(-B - s) / (2 * A), (-B + s) / (2 * A)]
+      .filter((t) => t > EPS && t < 1 - EPS)
+      .map((t) => ({ x: px + dx * t, y: py + dy * t }))
+  }
+
+  const events: Array<{ pt: { x: number; y: number }; inside: boolean } | Cross> = []
+  let inside = inCircle(corners[0].x, corners[0].y)
+  const startInside = inside
+  for (let i = 0; i < 4; i++) {
+    const p = corners[i]
+    const q = corners[(i + 1) % 4]
+    events.push({ pt: p, inside })
+    for (const hit of segHits(p.x, p.y, q.x, q.y)) {
+      inside = !inside
+      events.push({ x: hit.x, y: hit.y, kind: inside ? 'entry' : 'exit' })
+    }
+  }
+  if (inside !== startInside) return '' // tangent-degenerate; treat as empty
+
+  const crossings = events.filter((e): e is Cross => 'kind' in e)
+  if (crossings.length === 0) return '' // disjoint (corners outside, no hits)
+
+  // Stitch events into alternating line runs (inside the circle) and arc gaps.
+  const pieces: Piece[] = []
+  let run: { x: number; y: number }[] = []
+  let openExit: Cross | null = null
+  const flushRun = () => {
+    if (run.length > 0) pieces.push({ kind: 'line', pts: run })
+    run = []
+  }
+  for (const e of events) {
+    if ('kind' in e) {
+      if (e.kind === 'exit') {
+        run.push({ x: e.x, y: e.y })
+        flushRun()
+        openExit = e
+      } else {
+        if (openExit) pieces.push({ kind: 'gap', from: openExit, to: e })
+        openExit = null
+        run.push({ x: e.x, y: e.y })
+      }
+    } else if (e.inside) {
+      run.push(e.pt)
+    }
+  }
+  flushRun()
+  // The walk may have started mid-arc (first corner outside): close the wrap.
+  if (openExit) {
+    const firstEntry = crossings.find((c) => c.kind === 'entry')
+    if (firstEntry) pieces.push({ kind: 'gap', from: openExit, to: firstEntry })
+  }
+  // Merge a trailing line run into a leading one (perimeter wrap inside circle).
+  if (
+    pieces.length > 1 &&
+    pieces[0].kind === 'line' &&
+    pieces[pieces.length - 1].kind === 'line'
+  ) {
+    const tail = pieces.pop() as Extract<Piece, { kind: 'line' }>
+    ;(pieces[0] as Extract<Piece, { kind: 'line' }>).pts = [
+      ...tail.pts,
+      ...(pieces[0] as Extract<Piece, { kind: 'line' }>).pts,
+    ]
+  }
+
+  // Emit: lines as L runs, gaps as clockwise arcs (sweep=1 in screen coords).
+  const arcSpan = (from: Cross, to: Cross) => {
+    const a0 = Math.atan2(from.y - cy, from.x - cx)
+    const a1 = Math.atan2(to.y - cy, to.x - cx)
+    let span = a1 - a0
+    while (span < 0) span += Math.PI * 2
+    return span
+  }
+  let d = ''
+  const rr = n(r)
+  for (const piece of pieces) {
+    if (piece.kind === 'line') {
+      for (const pt of piece.pts) {
+        const p = rot(pt.x, pt.y)
+        d += d === '' ? `M${fmt(p)}` : `L${fmt(p)}`
+      }
+    } else {
+      const large = arcSpan(piece.from, piece.to) > Math.PI ? 1 : 0
+      const p = rot(piece.to.x, piece.to.y)
+      if (d === '') {
+        const p0 = rot(piece.from.x, piece.from.y)
+        d += `M${fmt(p0)}`
+      }
+      d += `A${rr},${rr} 0 ${large},1 ${fmt(p)}`
+    }
+  }
+  return d === '' ? '' : `${d}Z`
+}
+
+/** Rotate a point clockwise about a center, in screen coordinates. */
+export function rotateAbout(x: number, y: number, angleDeg: number, cx: number, cy: number) {
+  const a = angleDeg * DEG
+  const dx = x - cx
+  const dy = y - cy
+  return {
+    x: cx + dx * Math.cos(a) - dy * Math.sin(a),
+    y: cy + dx * Math.sin(a) + dy * Math.cos(a),
+  }
+}
+
 /** Point on a circle around the orb, for satellite placement. */
 export function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const { dx, dy } = dirFromAngle(angleDeg)

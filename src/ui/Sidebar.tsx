@@ -6,6 +6,7 @@ import {
   ORB_STYLE_LABELS,
   type AccentLayer,
   type BlendMode,
+  type ColorRef,
   type Layer,
   type LayerMask,
   type LockSection,
@@ -14,6 +15,8 @@ import {
   type OrbDoc,
   type OrbStyle,
   type Preset,
+  type SectorConfig,
+  type SectorFill,
   type ShadingLayer,
   type SliceConfig,
 } from '../types'
@@ -60,6 +63,8 @@ export type SidebarProps = {
   update: (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => void
   onAddPatternLayer: (patternId: string) => void
   onSetLayerPattern: (layerId: string, patternId: string) => void
+  /** Point a sector cell at a texture/pattern, deriving its color groups. */
+  onSetSectorTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
   palettePanel: Omit<PalettePanelProps, 'palette'>
   exportPanel: ExportPanelProps
   onApplyOrbStyle: (style: OrbStyle) => void
@@ -167,6 +172,237 @@ function SliceControls({
   )
 }
 
+/* ---------- sector-collage controls ---------- */
+
+/** A palette-spread starter for a cell added by the row-count control. */
+function defaultSectorFill(palette: Palette, index: number): SectorFill {
+  const count = Math.max(1, palette.colors.length)
+  return { kind: 'flat', color: { slot: (index * 3 + 1) % count } }
+}
+
+/** The ink a cell would keep when its fill kind changes — never destructive. */
+function carriedInk(fill: SectorFill): ColorRef {
+  if (fill.kind === 'flat') return fill.color
+  if (fill.kind === 'ramp') return fill.from
+  return fill.colors.find((c, i) => i > 0 && (c.alpha ?? 1) > 0.001) ?? { slot: 1 }
+}
+
+function SectorRowEditor({
+  rowKey,
+  label,
+  row,
+  palette,
+  parsedById,
+  patternOptions,
+  onChange,
+  onSetTexture,
+}: {
+  rowKey: 'rowA' | 'rowB'
+  label: string
+  row: SectorFill[]
+  palette: Palette
+  parsedById: Map<string, ParsedPattern>
+  patternOptions: Array<{ id: string; name: string; imported: boolean }>
+  onChange: (row: SectorFill[]) => void
+  onSetTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
+}) {
+  const setCount = (count: number) => {
+    const next = row.slice(0, count)
+    while (next.length < count) next.push(defaultSectorFill(palette, next.length + row.length))
+    onChange(next)
+  }
+  const patchCell = (i: number, fill: SectorFill) =>
+    onChange(row.map((f, j) => (j === i ? fill : f)))
+  // Prefer a procedural texture as the starting point; fall back to anything.
+  const defaultTextureId =
+    patternOptions.find((o) => o.id.startsWith('tx-'))?.id ?? patternOptions[0]?.id
+
+  return (
+    <>
+      <Segmented
+        label={`${label} — cells`}
+        value={String(Math.min(3, Math.max(1, row.length)))}
+        options={[
+          { value: '1', label: '1' },
+          { value: '2', label: '2' },
+          { value: '3', label: '3' },
+        ]}
+        onChange={(v) => setCount(Number(v))}
+      />
+      {row.map((fill, i) => {
+        const parsed = fill.kind === 'texture' ? parsedById.get(fill.patternId) : undefined
+        return (
+          <div key={i}>
+            <Segmented
+              label={`${label} · cell ${i + 1}`}
+              value={fill.kind}
+              options={[
+                { value: 'flat', label: 'flat' },
+                { value: 'ramp', label: 'ramp' },
+                { value: 'texture', label: 'texture' },
+              ]}
+              onChange={(kind) => {
+                if (kind === fill.kind) return
+                if (kind === 'texture') {
+                  if (defaultTextureId) onSetTexture(rowKey, i, defaultTextureId)
+                  return
+                }
+                // Keep the ink when switching kinds, so toggling is not destructive.
+                const ink = carriedInk(fill)
+                patchCell(
+                  i,
+                  kind === 'ramp'
+                    ? {
+                        kind: 'ramp',
+                        from: ink,
+                        to: { slot: Math.max(0, palette.colors.length - 1) },
+                        angle: 90,
+                      }
+                    : { kind: 'flat', color: ink },
+                )
+              }}
+            />
+            {fill.kind === 'flat' && (
+              <ColorRefEditor
+                name="Ink"
+                value={fill.color}
+                palette={palette}
+                onChange={(color) => patchCell(i, { ...fill, color })}
+              />
+            )}
+            {fill.kind === 'ramp' && (
+              <>
+                <ColorRefEditor
+                  name="Ramp from"
+                  value={fill.from}
+                  palette={palette}
+                  onChange={(from) => patchCell(i, { ...fill, from })}
+                />
+                <ColorRefEditor
+                  name="Ramp to"
+                  value={fill.to}
+                  palette={palette}
+                  onChange={(to) => patchCell(i, { ...fill, to })}
+                />
+                <Slider
+                  label="Ramp angle"
+                  value={fill.angle}
+                  min={0}
+                  max={360}
+                  step={1}
+                  suffix="°"
+                  onChange={(angle) => patchCell(i, { ...fill, angle })}
+                />
+              </>
+            )}
+            {fill.kind === 'texture' && (
+              <>
+                <Select
+                  label="Texture"
+                  value={fill.patternId}
+                  options={patternOptions.map((o) => ({
+                    value: o.id,
+                    label: o.imported ? `${o.name} (imported)` : o.name,
+                  }))}
+                  onChange={(id) => onSetTexture(rowKey, i, id)}
+                />
+                <div className="grid2">
+                  <Slider
+                    label="Scale"
+                    value={fill.scale}
+                    min={0.2}
+                    max={4}
+                    onChange={(scale) => patchCell(i, { ...fill, scale })}
+                  />
+                  <Slider
+                    label="Rotation"
+                    value={fill.rotation}
+                    min={0}
+                    max={360}
+                    step={1}
+                    suffix="°"
+                    onChange={(rotation) => patchCell(i, { ...fill, rotation })}
+                  />
+                </div>
+                {parsed?.groups.map((g) => (
+                  <ColorRefEditor
+                    key={g.index}
+                    name={g.label}
+                    chip={g.sample}
+                    value={fill.colors[g.index] ?? { slot: g.index }}
+                    palette={palette}
+                    onChange={(c) =>
+                      patchCell(i, {
+                        ...fill,
+                        colors: parsed.groups.map(
+                          (gg, gi) => (gi === g.index ? c : (fill.colors[gi] ?? { slot: gg.index })),
+                        ),
+                      })
+                    }
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+function SectorControls({
+  sectors,
+  palette,
+  parsedById,
+  patternOptions,
+  onPatch,
+  onSetTexture,
+}: {
+  sectors: SectorConfig
+  palette: Palette
+  parsedById: Map<string, ParsedPattern>
+  patternOptions: Array<{ id: string; name: string; imported: boolean }>
+  onPatch: (patch: Partial<SectorConfig>, coalesce?: string) => void
+  onSetTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
+}) {
+  const rowProps = { palette, parsedById, patternOptions, onSetTexture }
+  return (
+    <>
+      <Slider
+        label="Split angle"
+        value={sectors.angle}
+        min={0}
+        max={360}
+        step={1}
+        suffix="°"
+        onChange={(angle) => onPatch({ angle }, 'sec-angle')}
+      />
+      <Slider
+        label="Split offset"
+        value={sectors.offset}
+        min={-0.9}
+        max={0.9}
+        onChange={(offset) => onPatch({ offset }, 'sec-offset')}
+      />
+      <SectorRowEditor
+        rowKey="rowA"
+        label="Row A"
+        row={sectors.rowA}
+        onChange={(rowA) => onPatch({ rowA })}
+        {...rowProps}
+      />
+      <hr className="divider" />
+      <SectorRowEditor
+        rowKey="rowB"
+        label="Row B"
+        row={sectors.rowB}
+        onChange={(rowB) => onPatch({ rowB })}
+        {...rowProps}
+      />
+    </>
+  )
+}
+
 /* ---------- pattern layer mask ---------- */
 
 function MaskControls({
@@ -223,7 +459,7 @@ function MaskControls({
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { doc, palette, open, onToggleSection, update, onRandomizeSection } = props
+  const { doc, palette, parsedById, open, onToggleSection, update, onRandomizeSection } = props
 
   const setLock = (section: LockSection, on: boolean) =>
     update((d) => ({ ...d, locks: { ...d.locks, [section]: on } }))
@@ -342,7 +578,7 @@ export function Sidebar(props: SidebarProps) {
       <Section
         num="03"
         title="Orb"
-        hint={doc.orb.mode === 'sliced' ? 'sliced' : doc.orb.gradient.type}
+        hint={doc.orb.mode === 'disc' ? doc.orb.gradient.type : doc.orb.mode}
         open={open.orb}
         onToggle={() => onToggleSection('orb')}
         lock={lockFor('orb')}
@@ -384,6 +620,16 @@ export function Sidebar(props: SidebarProps) {
           restores them.
         </div>
         <Check
+          label="Solid fills — no gradients"
+          checked={doc.solidFills}
+          onChange={(solidFills) => update((d) => ({ ...d, solidFills }))}
+        />
+        <div className="note">
+          Renders every smooth gradient as a flat ink sampled from its own ramp: the disc fill,
+          the background, sector ramps and the vignette. Sliced bands stay (already flat fills).
+          Gradient settings are kept, so turning it off restores them.
+        </div>
+        <Check
           label="Visible"
           checked={doc.orb.visible}
           onChange={(visible) => update((d) => ({ ...d, orb: { ...d.orb, visible } }))}
@@ -394,6 +640,7 @@ export function Sidebar(props: SidebarProps) {
           options={[
             { value: 'disc', label: 'disc' },
             { value: 'sliced', label: 'sliced' },
+            { value: 'sectors', label: 'sectors' },
           ]}
           onChange={(mode) => update((d) => ({ ...d, orb: { ...d.orb, mode } }))}
         />
@@ -440,17 +687,44 @@ export function Sidebar(props: SidebarProps) {
             <hr className="divider" />
           </>
         )}
-        <div className="eyebrow">
-          {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
-        </div>
-        <GradientEditor
-          gradient={doc.orb.gradient}
-          palette={palette}
-          onChange={(gradient, coalesce) =>
-            update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
-          }
-        />
-        <hr className="divider" />
+        {doc.orb.mode === 'sectors' && (
+          <>
+            <div className="eyebrow">Sectors</div>
+            <div className="note">
+              One chord splits the disc into two rows; each row splits crosswise into equal
+              cells. Every cell paints independently, hard-edged — a collage, not a sphere.
+            </div>
+            <SectorControls
+              sectors={doc.orb.sectors}
+              palette={palette}
+              parsedById={parsedById}
+              patternOptions={props.patternOptions}
+              onSetTexture={props.onSetSectorTexture}
+              onPatch={(patch, coalesce) =>
+                update(
+                  (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, ...patch } } }),
+                  coalesce,
+                )
+              }
+            />
+            <hr className="divider" />
+          </>
+        )}
+        {doc.orb.mode !== 'sectors' && (
+          <>
+            <div className="eyebrow">
+              {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
+            </div>
+            <GradientEditor
+              gradient={doc.orb.gradient}
+              palette={palette}
+              onChange={(gradient, coalesce) =>
+                update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
+              }
+            />
+            <hr className="divider" />
+          </>
+        )}
         <Check
           label="Outline"
           checked={doc.orb.stroke.enabled}

@@ -34,6 +34,173 @@ Custom domain on the existing GitHub Pages deploy, three coupled pieces:
   `finalfinalff.github.io/planet-generator/` URL 301s to the domain, so
   existing links keep working.
 
+### Added: semantic layer names in exports (Figma editability, part 1)
+
+New requirement: exports must open in Figma fully editable. First finding from
+auditing real batch exports: the constructs we emit (paths, rects, circles,
+ellipses, polylines, groups, clipPaths, linear/radial gradients, standard blend
+modes) all map to editable Figma layers — but the tree would land as anonymous
+"Group / Vector" soup, which costs as much editability as a dropped fill.
+Figma reads the SVG `id` attribute as the layer name on import, so `OrbSvg` now
+marks logical layers with `data-name` and `serializeSvg` converts those to ids
+on the export clone (NCName-sanitized — ids cannot contain spaces — and
+deduplicated). Verified end-to-end through the batch/zip harness: exports carry
+`Background`, `Orb_disc`, `Sector_B1_Dither__Sparse_Scan`, `Pattern_Dot_Bloom`,
+`Ring`, `Satellite`; no `data-*` leaks.
+
+Also verified this round: the store-only ZIP writer passes `unzip -t` with v2
+documents, including a 2.9 MB expanded sector-texture file.
+
+Still open (needs a live Figma session, which needs the user): empirical import
+of the two staged test files, checking (1) whether the lens `<mask>` — luminance
+with a gradient feather — survives, and (2) `mix-blend-mode` fidelity. If masks
+fail, the candidate fix is a Figma-safe export path converting lens masks to
+exact circle∩circle clip geometry (feather dropped, editability kept).
+
+### Added: `solidFills` — the gradients-off standing constraint
+
+Client follow-up to flat-first: gradients themselves can read as spherical 3D
+rendering (a radial ramp on a disc is a lit sphere in all but name). New
+document flag `solidFills`, built as flat mode's sibling: render-side only —
+`OrbSvg` collapses every smooth gradient to its own ramp's midpoint ink
+(`solidFor`) — so toggling it off restores every gradient exactly, and remix
+carries it with zero special casing via the `{ ...doc }` spread.
+
+Scope decisions: the vignette is suppressed too (it is a smooth radial blend,
+which is exactly what the toggle removes — flat mode keeps it because flat is
+about sphere *cues*, not blends). Sliced bands stay (discrete ramp samples,
+already flat fills), and pattern-internal gradient spreads stay (they are the
+artwork's texture, not a document fill). Kept independent of `flat` rather
+than folded into it: gradients read as sphere surfaces, shading as sphere
+lighting, and the client may want either gone without the other. Orbit rings
+and satellites were explicitly kept, per the same feedback round.
+
+`remix.test.ts` gained a `solid fills` block mirroring the flat-mode contract
+(survival + changes-nothing-but-the-flag), sabotaged once to confirm it bites.
+
+### Added: second texture wave, mined from the older reference boards
+
+Four more generators in `src/lib/patterns/textures/`, sourced from `Examples/`
+material that predates the 2026-08-25 comps: **wave** (op-art sine/zigzag rule
+fields — the `c4926aa5` poster and two panels of the `d8a9d0db` board), **dots**
+(halftone grids with ping-pong size ramps — the board's dissolving-dot panel and
+the `abfd55d93` halftone arcs), **stipple** (seeded organic spatter with
+clustered placement and polygon splats for the large spots — `image 20`'s paint
+speckle, which is also the grain in the client comps that dither's blocky
+glitch never matched), and **hatch** (45° pinstripe families with density
+banding and a crosshatch weave — the board's bottom panels).
+
+Considered and dropped: the board's offset-brick stripes and diagonal shards —
+steps and dither already own that territory, and near-duplicate textures just
+dilute the remix pool. Same architecture as the first wave (ordinary pattern
+sources, same contract), so registration was one import block in
+`procedural.ts`. Tiling notes worth keeping: a dot-size ramp only tiles if it
+ping-pongs; a 45° hatch only tiles when its stripe offsets are periodic in
+x±y mod the tile; wave fields need whole wave/envelope/phase periods per tile.
+The library is now 18 file patterns + 23 procedural variants.
+
+### Changed: v2 goes flat-first — remix and defaults stop producing rendered lighting
+
+Client feedback on the Phase 3 remix grid: disc-mode results still came out as
+shaded spheres with terminators and highlights — the literalness v2 exists to
+retire. The fix is a stance, not a mode:
+
+- **`defaultDoc` ships the shading layer invisible and the rim light disabled.**
+  Both keep their tuned values, so the layer toggle and the `shaded-sphere`
+  style land somewhere sensible when someone opts back in.
+- **Remix never turns shading or the rim *on*.** Their values are still dealt
+  (the RNG stream is unchanged — visibility is a pure selection), but
+  `visible`/`enabled` follow the incoming document. A flat document stays flat
+  through any number of remixes; a legacy document that has shading visible
+  keeps remixing it, because that is the user's own setting.
+- **Only `shaded-sphere` reintroduces shading.** `patterned-disc` and
+  `overlap-bloom` now set it invisible — the crisp ink and the lens overlaps
+  carry those looks, matching the image 40 reference discs.
+
+Deliberately NOT done: forcing `doc.flat` (a standing user constraint remix
+and styles never write) and removing orbit rings from disc/sliced remixes (the
+complaint was lighting; orbits are a separate conversation if they come up).
+
+The abstract direction's print vocabulary, built as four generators in
+`src/lib/patterns/textures/` — concentric rings, radial rules, vertical-bar
+dither, stepped density stripes — each authored against a reference image and
+verified by screenshot (the tileable two seam-checked as 2×2). Decisions:
+
+- **Textures are pattern sources, not a new subsystem.** Each generator emits a
+  plain SVG string satisfying the parse contract (full-bleed plate, hex-literal
+  inks, drawable elements only), and `procedural.ts` registers the curated
+  variants as `PatternSource`s. Everything else — palette-slot mapping, pattern
+  layers, imports-style listing, remix reach — came for free. The four
+  generators were built by four parallel agents against that written contract;
+  all four came back drop-in compatible.
+- **Sector texture cells inline recolored markup; they never paint via
+  `<pattern>`.** `expandPatternFills` only rewrites `rect` fills, so a
+  pattern-filled cell `<path>` would silently lose its texture in a Figma
+  import. Inlining is export-safe by construction. Verified by extracting a
+  remixed collage's `<svg>` from the QA page and rendering it standalone —
+  identical.
+- **Cell clipping is one exact path, not nested clips** (see the Phase 1 entry
+  for the Chrome scaling bug): `circleRectIntersectionPath` computes cell∩circle
+  analytically. The trick that keeps it tractable: the sector structure rotates
+  about the circle's own center, so the circle is invariant — intersect an
+  axis-aligned rect with the circle in the unrotated frame, then rotate the
+  emitted points/arcs.
+- **Remix**: mode roll is now disc/sliced/sectors weighted `[0.36, 0.14, 0.5]` —
+  the brief asked for abstract at least as often as legacy. Sector config draws
+  happen unconditionally (like the slices) with the colors lock applied as pure
+  selection (previous fills' ColorRefs re-mapped over the drawn structure).
+  Three tunings from the remix contact sheet: flat cells never deal the ground
+  slot (a bg-colored cell reads as a bite out of the disc); plate-off texture
+  cells draw ink from the light deck only (dark ink on the dark canvas made
+  whole cells vanish); accents go invisible when the selected orb is sectors
+  (orbit rings around a collage read as astronomy).
+- **One `sector-collage` style, not three.** Style dropdown entries are
+  composition archetypes; the collage's variety comes from remix. The style
+  keeps the doc's sector config (as sliced-sweep keeps slice settings) and does
+  not set `doc.flat` — flat is a standing user constraint no style writes.
+  `detectOrbStyle` maps `mode === 'sectors'` to it unconditionally, mirroring
+  sliced-sweep.
+
+### Added: `sectors` orb mode — the abstract direction's structure (v2, Phase 1)
+
+Client feedback on the RSAC refresh: the orbs read as literal planet renderings.
+The 2026-08-25 comps (untracked, in `Examples/2026-08-25/`) replace the shaded
+sphere with a **sector collage**: the disc cut by one straight chord into two
+rows, each row cut crosswise into 1–3 hard-edged cells, each cell filled
+independently. This lands as a third `orb.mode` beside `disc` and `sliced`,
+additive only — no existing mode, style, default, or remix weighting was touched,
+and remix cannot produce `sectors` yet (that arrives with the sector styles).
+
+Decisions worth keeping:
+
+- **Cell geometry is derived, not authored** — cells split a row's width evenly;
+  only the chord's angle and offset exist as controls. Same philosophy as the
+  slices' derived radii: the reference look never shows bespoke cell widths, and
+  per-cell geometry would be nine controls nobody asked for.
+- **Ramp fills span the orb's box, not the cell**, so two adjacent ramp cells
+  read as parts of one composition instead of restarting at every seam. Ramp
+  angle is absolute (canvas space) and does not pick up the structure's rotation.
+- **Cells render as pre-rotated absolute paths under a single orb clip — not
+  nested clips.** The first implementation nested `clip-path` groups
+  (orb ∩ cell-rect). The markup was valid and rendered correctly standalone, but
+  Chrome mis-rasterizes nested clip intersections when the host `<svg>` is
+  CSS-scaled — square corners escape the disc — and CSS-scaled is exactly how the
+  editor stage, the batch cells, and any thumbnail render. Found by screenshotting
+  the QA contact sheet (scaled: broken) and the same dumped markup standalone
+  (natural size: correct). `rotatedRectPath` in `geometry.ts` bakes the rotation
+  into path coordinates so one clip level suffices.
+- **`shuffleColors` reaches sector fills**, drawn *after* every existing draw so
+  pre-sector documents shuffle byte-identically. Without this, an orb in sectors
+  mode looked immune to Shuffle colors. The shuffle test's geometry extractor now
+  projects sectors down to angle/offset/cell-counts — fills are colors, structure
+  is geometry — and the assertion was sabotaged once (angle+1 in the shuffle) to
+  confirm it fails when sector geometry moves.
+- **`detectOrbStyle` reports `custom` for sectors** until the sector styles
+  exist; claiming `flat-disc` would be a lie the dropdown acts on.
+- One process note: a careless `git checkout` during test sabotage reverted
+  uncommitted remix edits (the sabotage was done with shell perl instead of a
+  tracked edit). Re-applied. Sabotage via real edits, on committed work.
+
 ### Changed: the seven hand-authored palettes are commented out
 
 `ember-terminator`, `pale-sky-brights`, `circuit-jade`, `bauhaus-signal`,

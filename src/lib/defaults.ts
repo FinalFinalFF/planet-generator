@@ -13,6 +13,7 @@ import {
   type Orb,
   type OrbDoc,
   type OrbStyle,
+  type SectorConfig,
   type ShadingLayer,
   type SliceConfig,
 } from '../types'
@@ -68,6 +69,32 @@ export const DEFAULT_SLICES: SliceConfig = {
   phase: 0.12,
   // Multiply keeps the base hues; screen washes the whole disc toward white.
   blend: 'multiply',
+}
+
+/**
+ * The default sector collage reads like the 2026-08-25 comps: a light ramp
+ * across the top half, the bottom split into a dark cell and a mid accent.
+ */
+export const DEFAULT_SECTORS: SectorConfig = {
+  angle: 0,
+  offset: 0,
+  rowA: [{ kind: 'ramp', from: ref(5), to: ref(7), angle: 64 }],
+  rowB: [
+    { kind: 'flat', color: ref(0) },
+    { kind: 'flat', color: ref(3) },
+  ],
+}
+
+/**
+ * Sector configs hold arrays of fill objects, so a spread is not enough —
+ * two documents sharing one row array would alias each other's cells.
+ */
+export function cloneSectors(s: SectorConfig): SectorConfig {
+  return {
+    ...s,
+    rowA: s.rowA.map((f) => ({ ...f })),
+    rowB: s.rowB.map((f) => ({ ...f })),
+  }
 }
 
 /* ---------- pattern layer color defaults ---------- */
@@ -180,7 +207,9 @@ export function makeAccentLayer(overrides: Partial<AccentLayer> = {}): AccentLay
       },
     ],
     rim: {
-      enabled: true,
+      // Off by default — the crescent is a lighting cue, and v2 avoids those.
+      // The tuned values stay so enabling it lands somewhere sensible.
+      enabled: false,
       angle: 306,
       width: 0.016,
       spread: 0.3,
@@ -246,7 +275,10 @@ export function defaultDoc(seed: string): OrbDoc {
       ],
       mask: { mode: 'lens', cx: 0.28, cy: 0.24, radius: 0.92, feather: 0.45 },
     },
-    makeShadingLayer({ id: 'sh-default' }),
+    // v2 opens flat-graphic: the layers exist with tuned values so the
+    // shaded-sphere style and the layer toggles can bring them back, but
+    // nothing renders as lighting until someone asks for it.
+    makeShadingLayer({ id: 'sh-default', visible: false }),
     makeAccentLayer({ id: 'ac-default' }),
   ]
 
@@ -274,6 +306,7 @@ export function defaultDoc(seed: string): OrbDoc {
       cy: 0.5,
       radius: 0.62,
       slices: { ...DEFAULT_SLICES },
+      sectors: cloneSectors(DEFAULT_SECTORS),
       // The ember→cream→teal ramp from the reference, read left to right.
       // Linear rather than conic on purpose: a conic's convergence point
       // reads as a pinwheel pinch when it lands on the disc.
@@ -296,6 +329,7 @@ export function defaultDoc(seed: string): OrbDoc {
     layers,
     lockPatternCount: false,
     flat: false,
+    solidFills: false,
     locks: {
       colors: false,
       orb: false,
@@ -337,6 +371,7 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
     ...base,
     mode: base.mode ?? 'disc',
     slices: { ...DEFAULT_SLICES, ...(base.slices ?? {}) },
+    sectors: { ...cloneSectors(DEFAULT_SECTORS), ...(base.sectors ?? {}) },
   }
   const layers = doc.layers.map((layer) =>
     layer.kind === 'pattern'
@@ -363,6 +398,7 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
     locks: { ...locks, orb: locks.orb ?? legacyPlanetLock ?? false } as Locks,
     lockPatternCount: doc.lockPatternCount ?? false,
     flat: doc.flat ?? false,
+    solidFills: doc.solidFills ?? false,
   }
   delete (out as { planet?: unknown }).planet
   return out as OrbDoc
@@ -417,8 +453,8 @@ function planFor(style: OrbStyle): StylePlan {
       }
 
     case 'patterned-disc':
-      // Crisp ink across the whole disc, shading pulled back so the pattern
-      // stays legible edge to edge.
+      // Crisp ink across the whole disc. v2: no shading at all — the pattern
+      // and the gradient carry it, matching the image 40 reference discs.
       return {
         orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p, i) => ({
@@ -428,13 +464,7 @@ function planFor(style: OrbStyle): StylePlan {
           opacity: i === 0 ? 0.72 : p.opacity,
           mask: { ...p.mask, mode: 'orb' as const },
         }),
-        shading: {
-          visible: true,
-          shadow: 0.4,
-          highlight: 0.16,
-          contactShadow: 0.3,
-          highlightSize: 0.9,
-        },
+        shading: { visible: false },
         accentsVisible: true,
       }
 
@@ -457,7 +487,8 @@ function planFor(style: OrbStyle): StylePlan {
             feather: 0.55,
           },
         }),
-        shading: { visible: true, shadow: 0.62, highlight: 0.28, contactShadow: 0.42 },
+        // v2: the lens overlaps carry the depth; no rendered lighting.
+        shading: { visible: false },
         accentsVisible: true,
       }
 
@@ -469,6 +500,19 @@ function planFor(style: OrbStyle): StylePlan {
         pattern: (p) => ({ ...p, visible: false }),
         shading: { visible: false },
         accentsVisible: true,
+      }
+
+    case 'sector-collage':
+      // The abstract direction: the collage carries the whole orb, so every
+      // 3D cue goes — no shading, no accents, no pattern layers on top. The
+      // existing sector config is kept (like sliced-sweep keeps slice
+      // settings); remix is what deals new cells. Deliberately does not touch
+      // `doc.flat` — that is a standing user constraint, never a style's.
+      return {
+        orb: (p) => ({ ...p, mode: 'sectors' }),
+        pattern: (p) => ({ ...p, visible: false }),
+        shading: { visible: false },
+        accentsVisible: false,
       }
   }
 }
@@ -532,6 +576,7 @@ export function applyOrbStyle(doc: OrbDoc, style: OrbStyle): OrbStyleResult {
 
 /** Best-effort read of which style the current document resembles. */
 export function detectOrbStyle(doc: OrbDoc): OrbStyle | 'custom' {
+  if (doc.orb.mode === 'sectors') return 'sector-collage'
   if (doc.orb.mode === 'sliced') return 'sliced-sweep'
   const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
   const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')

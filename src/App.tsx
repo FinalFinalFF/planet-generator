@@ -179,15 +179,20 @@ export default function App() {
     }
   }, [booted, ingest])
 
-  // Any pattern a layer references but that is not parsed yet.
+  // Any pattern a layer or a sector texture cell references but that is not
+  // parsed yet — a persisted document must repaint its texture cells on load.
   useEffect(() => {
-    const missing = doc.layers
-      .filter((l) => l.kind === 'pattern')
-      .map((l) => (l.kind === 'pattern' ? l.patternId : ''))
-      .filter((id) => id && !parsedById.has(id))
+    const missing = [
+      ...doc.layers
+        .filter((l) => l.kind === 'pattern')
+        .map((l) => (l.kind === 'pattern' ? l.patternId : '')),
+      ...[...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB]
+        .filter((f) => f.kind === 'texture')
+        .map((f) => (f.kind === 'texture' ? f.patternId : '')),
+    ].filter((id) => id && !parsedById.has(id))
     if (missing.length === 0) return
     loadPatterns(missing).then(ingest).catch(() => undefined)
-  }, [doc.layers, parsedById, ingest])
+  }, [doc.layers, doc.orb.sectors, parsedById, ingest])
 
   /* ---- persistence of UI prefs ---- */
   const pendingUi = useRef<storage.UiState | null>(null)
@@ -317,6 +322,39 @@ export default function App() {
         }))
       } catch (err) {
         notify(err instanceof Error ? err.message : 'Could not load that pattern', true)
+      }
+    },
+    [ingest, palette, rawUpdate, notify],
+  )
+
+  const onSetSectorTexture = useCallback(
+    async (row: 'rowA' | 'rowB', index: number, patternId: string) => {
+      try {
+        const parsed = await loadPattern(patternId)
+        ingest([parsed])
+        rawUpdate((d) => ({
+          ...d,
+          orb: {
+            ...d.orb,
+            sectors: {
+              ...d.orb.sectors,
+              [row]: d.orb.sectors[row].map((f, i) => {
+                if (i !== index) return f
+                return {
+                  kind: 'texture' as const,
+                  patternId,
+                  // Group counts differ between patterns, so re-derive — same
+                  // rule as onSetLayerPattern.
+                  colors: defaultPatternColors(parsed, palette, 'normal'),
+                  scale: f.kind === 'texture' ? f.scale : 1,
+                  rotation: f.kind === 'texture' ? f.rotation : 0,
+                }
+              }),
+            },
+          },
+        }))
+      } catch (err) {
+        notify(err instanceof Error ? err.message : 'Could not load that texture', true)
       }
     },
     [ingest, palette, rawUpdate, notify],
@@ -762,6 +800,7 @@ export default function App() {
         update={update}
         onAddPatternLayer={onAddPatternLayer}
         onSetLayerPattern={onSetLayerPattern}
+        onSetSectorTexture={onSetSectorTexture}
         onApplyOrbStyle={onApplyOrbStyle}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}

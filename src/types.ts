@@ -163,8 +163,46 @@ export type AccentLayer = {
 export type Layer = PatternLayer | ShadingLayer | AccentLayer
 export type LayerKind = Layer['kind']
 
-export const ORB_MODES = ['disc', 'sliced'] as const
+export const ORB_MODES = ['disc', 'sliced', 'sectors'] as const
 export type OrbMode = (typeof ORB_MODES)[number]
+
+export const SECTOR_FILL_KINDS = ['flat', 'ramp', 'texture'] as const
+export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
+
+/**
+ * One sector cell's paint. `flat` is a single ink; `ramp` is a two-stop linear
+ * gradient spanning the orb's bounding box rather than the cell, so adjacent
+ * ramp cells read as parts of one composition instead of restarting at every
+ * seam. `texture` fills the cell with any registered pattern (the procedural
+ * textures, the built-in library, or an import), cover-fit and recolored
+ * through the same parse pipeline as pattern layers — `colors` has one entry
+ * per color group of the referenced pattern, exactly like `PatternLayer`.
+ */
+export type SectorFill =
+  | { kind: 'flat'; color: ColorRef }
+  | { kind: 'ramp'; from: ColorRef; to: ColorRef; angle: number }
+  | { kind: 'texture'; patternId: string; colors: ColorRef[]; scale: number; rotation: number }
+
+/**
+ * The sector collage from the 2026-08-25 references: the disc cut by one
+ * straight chord into two rows, each row cut crosswise into 1–3 cells, every
+ * cell filled independently with a hard edge — a collage of textures, not a
+ * shaded sphere.
+ *
+ * Cell geometry is derived, matching the slices' philosophy: cells split a
+ * row's width evenly, and only the chord's angle and offset are authored.
+ * There is deliberately no per-cell geometry control and no feathering —
+ * hard seams are the look.
+ */
+export type SectorConfig = {
+  /** Rotation of the whole split structure, degrees clockwise. 0 = horizontal chord. */
+  angle: number
+  /** Chord offset from the orb center along its normal, in orb radii. */
+  offset: number
+  /** Fills for the two rows' cells (1–3 each). At angle 0, row A is on top. */
+  rowA: SectorFill[]
+  rowB: SectorFill[]
+}
 
 /**
  * The sliced sphere from the reference.
@@ -217,9 +255,11 @@ export type Orb = {
   cy: number
   /** Radius as a fraction of min(width, height) / 2. */
   radius: number
-  /** Colors for both modes: `sliced` samples this ramp per slice. */
+  /** Colors for disc and sliced: `sliced` samples this ramp per slice. */
   gradient: Gradient
   slices: SliceConfig
+  /** Sector-collage cells; only rendered when `mode` is `sectors`. */
+  sectors: SectorConfig
   stroke: {
     enabled: boolean
     width: number
@@ -277,6 +317,20 @@ export type OrbDoc = {
    * it off restores the user's shading and rim settings exactly.
    */
   flat: boolean
+  /**
+   * Render every smooth gradient as a flat ink sampled from its own ramp —
+   * the second standing constraint beside `flat`, and the same design: it
+   * changes what renders, never the data, so toggling it off restores every
+   * gradient exactly. Suppressed: the orb's disc gradient (linear, radial and
+   * conic), the background gradient, sector `ramp` cells, and the vignette.
+   * Kept: sliced-mode bands (discrete samples — already flat fills) and
+   * pattern-internal gradient spreads (they are the artwork's texture).
+   *
+   * Independent of `flat` on purpose: gradients read as sphere *surfaces*,
+   * shading reads as sphere *lighting*, and the client may want either cue
+   * gone without the other. Like `flat`, deliberately not in `doc.locks`.
+   */
+  solidFills: boolean
 }
 
 export type Preset = {
@@ -302,6 +356,7 @@ export const ORB_STYLES = [
   'patterned-disc',
   'overlap-bloom',
   'sliced-sweep',
+  'sector-collage',
 ] as const
 export type OrbStyle = (typeof ORB_STYLES)[number]
 
@@ -311,4 +366,5 @@ export const ORB_STYLE_LABELS: Record<OrbStyle, string> = {
   'patterned-disc': 'Patterned disc',
   'overlap-bloom': 'Overlap bloom',
   'sliced-sweep': 'Sliced sweep',
+  'sector-collage': 'Sector collage',
 }

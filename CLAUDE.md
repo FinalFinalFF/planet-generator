@@ -33,6 +33,12 @@ and the custom domain are a pair: if the domain is ever removed, `base` must go
 back to `/planet-generator/` in the same change — getting this wrong 404s every
 asset on the live site.
 
+**Pushing to `main` deploys** — a GitHub Actions workflow runs `npm run build`
+and publishes to GitHub Pages, so a type error blocks the deploy rather than
+shipping a broken page. `Examples/`, `Palettes/` and `Frame 468.png` are
+deliberately untracked (third-party posters and brand boards in a public repo —
+see `.gitignore`); never force-add them.
+
 ### Keep CHANGELOG.md current
 
 `CHANGELOG.md` is a **decision log**, not a commit summary. After substantive
@@ -100,7 +106,12 @@ This forbids a whole class of otherwise-reasonable changes:
   viewBox). PNG export passes `expandPatterns: false` — the rasterizer tiles
   correctly and expanding only bloats the intermediate string.
 - **`data-role="background"`** marks the background group so the transparent
-  export can drop it wholesale; `serializeSvg` then strips all `data-*`.
+  export can drop it wholesale. **`data-name`** marks logical layers
+  (`Background`, `Orb disc`, `Sector B1 <texture>`, `Pattern <name>`, `Ring`…):
+  `serializeSvg` turns each into an `id` on the clone (NCName-sanitized,
+  deduplicated), because design tools — Figma included — read `id` as the layer
+  name on import, and an unnamed export lands as "Group/Vector" soup.
+  `serializeSvg` then strips all `data-*`.
 
 Shading is the subtle case: its children each carry their own
 `mix-blend-mode` and their own opacity, and the wrapping `<g>` deliberately has
@@ -109,7 +120,7 @@ terminator shadow from multiplying against the orb beneath it.
 
 ### Orb render modes
 
-`orb.mode` is `disc` (gradient-filled circle) or `sliced`. `SlicedOrb`
+`orb.mode` is `disc` (gradient-filled circle), `sliced`, or `sectors`. `SlicedOrb`
 builds the reference's banded lattice from **concentric circles about a focus
 outside the orb**, drawn largest first so each smaller circle paints over the
 last and leaves an annulus visible. Two things there are load-bearing and easy to
@@ -125,6 +136,47 @@ undo by accident:
 `slices.blend` defaults to `multiply`; `screen` washes the disc toward white and
 loses the base hues. Slices are always clipped to the circle — concentric bands
 have no scalloped silhouette to gain by running free, they just flood the canvas.
+
+### Sector mode (the v2 abstract direction)
+
+`sectors` is the collage from the 2026-08-25 client comps: one chord splits the
+disc into two rows, each row splits crosswise into 1–3 equal cells, each cell
+filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
+
+- **Cell geometry is derived** — even splits; only the chord's angle and offset
+  are authored. Same philosophy as the slices' derived radii.
+- **Never nest clip paths.** Chrome mis-rasterizes nested clip intersections
+  when the host `<svg>` is CSS-scaled — which is how the editor stage, batch
+  cells, and thumbnails all render (correct standalone, broken scaled; see
+  CHANGELOG). Flat/ramp cells are pre-rotated rect *paths* under the single orb
+  clip (`rotatedRectPath`); texture cells clip their inlined markup with one
+  clipPath holding the exact cell∩circle path (`circleRectIntersectionPath` —
+  the rotation is about the circle's center, so the circle is invariant and the
+  intersection computes in the unrotated frame).
+- **Texture cells never paint via `<pattern>`** — `expandPatternFills` only
+  rewrites `rect` fills, so a pattern-filled `<path>` would silently lose its
+  texture in Figma. They inline the recolored markup cover-fit instead, which
+  is export-safe by construction.
+- **Ramps span the orb's box, not the cell**, so adjacent ramp cells read as one
+  composition; ramp angle is absolute and ignores the structure's rotation.
+- The `sector-collage` style maps to/from `detectOrbStyle` and turns shading,
+  accents, and pattern layers off — it does **not** touch `doc.flat` (styles
+  never write the standing constraint). Remix retires accents whenever the
+  selected orb is sectors: orbit rings around a collage read as astronomy,
+  which is the literalness v2 exists to avoid.
+
+### Procedural textures
+
+`src/lib/patterns/textures/` (rings, rules, dither, steps) generate SVG
+*strings* that register as ordinary `PatternSource`s (`procedural.ts`,
+registered by `registry.ts` at import). That is the whole design: because they
+go through the same parse → recolor pipeline as `Patterns/` files, they get
+palette mapping, pattern layers, sector texture cells, and remix reach with no
+special cases. Their contract: 400×400 viewBox, full-bleed `#0A0A0A` plate
+first (detected and hidden as the Plate group), one light ink hex, only plain
+drawable elements, deterministic (`makeRng(seed)` for the stochastic ones),
+dither/steps tile seamlessly. Ids start `tx-` — remix's sector dealing prefers
+that pool (`dealFill` in `remix.ts`).
 
 ### Pattern layer masks
 
@@ -167,6 +219,16 @@ It is deliberately **not** in `doc.locks` — a lock freezes values against
 randomization, this changes what renders. `detectOrbStyle` treats shading as
 invisible when flat, so a suppressed-shading document does not claim to be
 `shaded-sphere`.
+
+**`doc.solidFills` is the second standing constraint**, same design and same
+rules: render-side only (every smooth gradient collapses to its own mid-ramp
+ink via `solidFor`), survives remix via the `{ ...doc }` spread, not in
+`doc.locks`, asserted by the same no-mutation test pattern in `remix.test.ts`.
+Suppressed: the disc gradient, the background gradient, sector ramp cells, and
+the vignette (a smooth blend — unlike flat mode, which keeps it). Kept: sliced
+bands (discrete samples, already flat fills) and pattern-internal gradient
+spreads (artwork texture). Independent of `flat` on purpose — gradients read
+as sphere surfaces, shading as sphere lighting, and either cue can go alone.
 
 ### Pattern pipeline (three files, one flow)
 
@@ -227,8 +289,11 @@ any gradient authored against a longer palette. Palettes shorter than the ~8 slo
 the default document assumes are normal (pasting four hex codes makes one), so
 this path is hit in practice.
 
-Built-ins live in `BUILTIN_PALETTES`; the seven sampled from `Palettes/` carry a
-comment naming the source image.
+Built-ins live in `BUILTIN_PALETTES` — currently 18, all sampled from reference
+material: seven from the image boards in `Palettes/` and eleven from the
+`Palettes/Gradients/` SVGs, each with a comment naming its source file. The
+original hand-authored set is retired but kept in a comment block above them;
+leave it there rather than deleting or reviving it.
 
 ### Layer stack
 
@@ -363,6 +428,20 @@ than adds, so it has three moving parts that must stay together:
 The legacy names are load-bearing compatibility, not leftovers. Do not "finish
 the rename" by deleting them.
 
+### Undo history
+
+`src/state/useDoc.ts` owns document state: a past/present/future history with
+coalescing and a debounced localStorage save. Two contracts for callers:
+
+- Continuous controls (sliders, drags) pass a stable `coalesce` key so a drag
+  collapses into **one** undo entry inside the 700 ms window; distinct edits need
+  distinct keys or they merge.
+- `transient: true` replaces the present without touching history at all — for
+  live previews mid-gesture, with a real commit at the end.
+
+The hook is StrictMode-safe by construction (this regressed once — see
+CHANGELOG); keep effects idempotent if you touch it.
+
 ## Reference material
 
 `Examples/` holds the target aesthetic. `image 41.png` is the sliced-sphere
@@ -372,7 +451,9 @@ large scale — not low-opacity soft-light washes. Defaults and remix weighting 
 tuned that way; keep them there.
 
 `CLAUDE-CODE-PROMPTS.md` is the original brief. **All three prompts are
-implemented.** Keyboard shortcuts are `R`, `⇧R`, `S`, `E`, `B`, `Esc`, and
+implemented.** `CLAUDE-CODE-FIX-PROMPTS.md` is the code-review follow-up log —
+all nine of its prompts are implemented too; treat both as history, not a
+to-do list. Keyboard shortcuts are `R`, `⇧R`, `S`, `E`, `B`, `Esc`, and
 `⌘Z` / `⇧⌘Z`.
 
 ## Editor chrome

@@ -15,6 +15,7 @@ import {
   type Palette,
   type PatternLayer,
   type OrbDoc,
+  type SectorFill,
   type ShadingLayer,
 } from '../types'
 import { DEFAULT_LAYER_MASK } from '../lib/defaults'
@@ -24,9 +25,12 @@ import {
   arcPath,
   crescentPath,
   dirFromAngle,
+  circleRectIntersectionPath,
   linearEndpoints,
   n,
   polar,
+  rotateAbout,
+  rotatedRectPath,
   wedgePath,
   type Box,
 } from '../lib/geometry'
@@ -96,6 +100,16 @@ function sampleGradient(g: Gradient, palette: Palette, t: number): Sample {
     }
   }
   return { hex: resolveColor(last.color, palette), alpha: refAlpha(last.color) }
+}
+
+/**
+ * The flat ink a gradient collapses to under `doc.solidFills`: its own ramp
+ * sampled at the midpoint, so the substitute stays palette-driven and close to
+ * the gradient's overall read rather than grabbing one end of it.
+ */
+function solidFor(g: Gradient, palette: Palette): string {
+  const s = sampleGradient(g, palette, 0.5)
+  return withAlpha(s.hex, s.alpha)
 }
 
 /** Real SVG gradient defs for linear/radial. Conic is drawn as wedges instead. */
@@ -239,12 +253,160 @@ function SlicedOrb({ ctx }: { ctx: Ctx }) {
   // Always clipped: bands are concentric, so letting them run free just floods
   // the canvas rather than scalloping a silhouette.
   return (
-    <g clipPath={`url(#${prefix}-orb-clip)`}>
+    <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sliced orb">
       <g>{family(0, clamp(s.alpha, 0, 1))}</g>
       {families === 2 && (
         <g style={blendStyle(s.blend)}>{family(1, clamp(s.modulation, 0, 1))}</g>
       )}
     </g>
+  )
+}
+
+/* ---------- sector collage ---------- */
+
+/** A SectorFill ramp as a throwaway two-stop Gradient, for GradientDef. */
+function rampGradient(fill: Extract<SectorFill, { kind: 'ramp' }>): Gradient {
+  return {
+    type: 'linear',
+    angle: fill.angle,
+    stops: [
+      { id: 'a', offset: 0, color: fill.from },
+      { id: 'b', offset: 1, color: fill.to },
+    ],
+    focusX: 0.5,
+    focusY: 0.5,
+    radius: 0.75,
+    segments: 180,
+  }
+}
+
+/**
+ * The abstract sector collage: one chord splits the disc into two rows, each
+ * row splits crosswise into 1–3 evenly sized cells, and every cell paints
+ * independently with a hard edge.
+ *
+ * Geometry lives in a frame where the chord is horizontal: each cell is an
+ * axis-aligned rect there, pre-rotated into place in JS and emitted as one
+ * absolute `<path>` clipped only by the orb circle. Deliberately not a nested
+ * clip (orb ∩ cell): Chrome mis-rasterizes nested clip-path intersections when
+ * the host <svg> is CSS-scaled, which is exactly how the editor stage and the
+ * batch cells render. Ramp gradients stay in absolute canvas space, so a
+ * ramp's angle means the same thing in every cell regardless of `angle`.
+ * Outer cell edges overhang the disc generously — the orb clip trims them —
+ * so only the seams need to be exact.
+ */
+function SectorOrb({ ctx }: { ctx: Ctx }) {
+  const { cx, cy, r, prefix, palette, doc } = ctx
+  const s = doc.orb.sectors
+  const orbBox: Box = { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }
+  const pad = r * 2.2
+  const chordY = cy + clamp(s.offset, -0.95, 0.95) * r
+
+  const rows: SectorFill[][] = [s.rowA, s.rowB].map((row) =>
+    row.length ? row.slice(0, 3) : [{ kind: 'flat', color: { slot: 0 } }],
+  )
+
+  const defs: React.ReactNode[] = []
+  const cells: React.ReactNode[] = []
+  const textured: React.ReactNode[] = []
+  rows.forEach((row, ri) => {
+    const y0 = ri === 0 ? cy - pad : chordY
+    const y1 = ri === 0 ? chordY : cy + pad
+    row.forEach((fill, ci) => {
+      const x0 = ci === 0 ? cx - pad : cx - r + (2 * r * ci) / row.length
+      const x1 = ci === row.length - 1 ? cx + pad : cx - r + (2 * r * (ci + 1)) / row.length
+
+      if (fill.kind === 'texture') {
+        const parsed = ctx.parsedById.get(fill.patternId)
+        if (!parsed) return // not parsed yet; the cell paints once it loads
+        // Clamp outer overhangs to just past the circle so the intersection
+        // walk works with tame numbers; never clamp *inside* the circle, or
+        // the clamp itself would change the intersection.
+        const m = r * 1.05
+        const gx0 = Math.max(x0, cx - m)
+        const gx1 = Math.min(x1, cx + m)
+        const gy0 = Math.max(y0, cy - m)
+        const gy1 = Math.min(y1, cy + m)
+        const cellD = circleRectIntersectionPath(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+        if (!cellD) return // chord pushed the cell entirely off the disc
+
+        const paints: GroupPaint[] = parsed.groups.map((g) => {
+          const ref = fill.colors[g.index]
+          return { hex: resolveColor(ref ?? { slot: g.index }, palette), alpha: refAlpha(ref) }
+        })
+        const markup = recolor(
+          parsed,
+          resolveTokens(parsed, paints),
+          `${prefix}-sec-${ri}-${ci}`,
+        )
+        // Cover-fit over the cell's visible box: sized to its diagonal so any
+        // texture rotation still covers, centered on the box's rotated center.
+        const bw = Math.max(1, gx1 - gx0)
+        const bh = Math.max(1, gy1 - gy0)
+        const bc = rotateAbout((gx0 + gx1) / 2, (gy0 + gy1) / 2, s.angle, cx, cy)
+        const k = (Math.hypot(bw, bh) * Math.max(0.05, fill.scale)) /
+          Math.min(parsed.width, parsed.height)
+        const transform =
+          `translate(${n(bc.x)} ${n(bc.y)}) rotate(${n(fill.rotation)}) ` +
+          `scale(${n(k, 5)}) translate(${n(-parsed.width / 2)} ${n(-parsed.height / 2)})`
+        const clipId = `${prefix}-secclip-${ri}-${ci}`
+        defs.push(
+          <clipPath key={clipId} id={clipId}>
+            <path d={cellD} />
+          </clipPath>,
+        )
+        textured.push(
+          // One clip level, holding the exact cell∩circle path — see the
+          // nested-clip note in the component comment.
+          <g
+            key={`tx-${ri}-${ci}`}
+            clipPath={`url(#${clipId})`}
+            data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1} ${parsed.name}`}
+          >
+            <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
+          </g>,
+        )
+        return
+      }
+
+      const gradId = `${prefix}-secg-${ri}-${ci}`
+      // Under solid fills a ramp cell collapses to its midpoint ink, same as
+      // every other gradient in the document.
+      const rampSolid = fill.kind === 'ramp' && doc.solidFills
+      if (fill.kind === 'ramp' && !rampSolid) {
+        defs.push(
+          <GradientDef
+            key={gradId}
+            id={gradId}
+            gradient={rampGradient(fill)}
+            box={orbBox}
+            palette={palette}
+          />,
+        )
+      }
+      cells.push(
+        <path
+          key={`${ri}-${ci}`}
+          data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1}`}
+          d={rotatedRectPath(x0, y0, x1, y1, s.angle, cx, cy)}
+          fill={
+            fill.kind === 'flat'
+              ? color(fill.color, palette)
+              : rampSolid
+                ? solidFor(rampGradient(fill as Extract<SectorFill, { kind: 'ramp' }>), palette)
+                : `url(#${gradId})`
+          }
+        />,
+      )
+    })
+  })
+
+  return (
+    <Fragment>
+      {defs.length > 0 && <defs>{defs}</defs>}
+      <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sector cells">{cells}</g>
+      {textured}
+    </Fragment>
   )
 }
 
@@ -341,6 +503,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
           clipPath={`url(#${prefix}-orb-clip)`}
           opacity={n(layer.opacity, 4)}
           style={blendStyle(layer.blend)}
+          data-name={`Pattern ${layer.name}`}
         >
           <g mask={useMask ? `url(#${maskId})` : undefined}>
             <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
@@ -371,6 +534,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
         clipPath={`url(#${prefix}-orb-clip)`}
         opacity={n(layer.opacity, 4)}
         style={blendStyle(layer.blend)}
+        data-name={`Pattern ${layer.name}`}
       >
         <rect
           x={n(cx - r)}
@@ -442,7 +606,7 @@ function ShadingLayerView({ layer, ctx }: { layer: ShadingLayer; ctx: Ctx }) {
       </defs>
       {/* No group opacity: that would isolate the group and stop these from
           blending against the orb underneath. */}
-      <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(layer.blend)}>
+      <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(layer.blend)} data-name="Shading">
         {sAmt > 0.001 && (
           <circle
             cx={n(cx)}
@@ -516,6 +680,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
         return (
           <path
             key={ring.id}
+            data-name="Ring"
             d={arcPath(cx, cy, rr, Math.max(1, rr * clamp(ring.tilt, 0.02, 1)), ring.start, ring.sweep, ring.rotation)}
             fill="none"
             stroke={resolveColor(ring.color, palette)}
@@ -534,6 +699,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
         return (
           <circle
             key={sat.id}
+            data-name="Satellite"
             cx={n(p.x)}
             cy={n(p.y)}
             r={n(sr)}
@@ -547,7 +713,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
       })}
 
       {showRim && (
-        <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(rim.blend)}>
+        <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(rim.blend)} data-name="Rim light">
           <path
             d={crescentPath(cx, cy, r, rim.angle, -Math.max(0.001, rim.width) * r)}
             fillRule="evenodd"
@@ -566,7 +732,10 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
   const bg = doc.background
   const gradId = `${prefix}-bg-grad`
   const vignetteId = `${prefix}-bg-vignette`
-  const vignette = clamp(bg.vignette, 0, 1)
+  // Solid fills retires the vignette too: it is a smooth radial blend, and
+  // smooth blends are exactly what the toggle exists to remove. (Flat mode
+  // keeps it — that toggle is about sphere cues, this one about gradients.)
+  const vignette = doc.solidFills ? 0 : clamp(bg.vignette, 0, 1)
 
   return (
     <Fragment>
@@ -579,7 +748,16 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
           fill={color(bg.color, palette)}
         />
       )}
-      {bg.kind === 'gradient' && bg.gradient.type !== 'conic' && (
+      {bg.kind === 'gradient' && doc.solidFills && (
+        <rect
+          x={n(canvas.x)}
+          y={n(canvas.y)}
+          width={n(canvas.w)}
+          height={n(canvas.h)}
+          fill={solidFor(bg.gradient, palette)}
+        />
+      )}
+      {bg.kind === 'gradient' && !doc.solidFills && bg.gradient.type !== 'conic' && (
         <Fragment>
           <defs>
             <GradientDef id={gradId} gradient={bg.gradient} box={canvas} palette={palette} />
@@ -593,7 +771,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
           />
         </Fragment>
       )}
-      {bg.kind === 'gradient' && bg.gradient.type === 'conic' && (
+      {bg.kind === 'gradient' && !doc.solidFills && bg.gradient.type === 'conic' && (
         <Fragment>
           <defs>
             <clipPath id={`${prefix}-bg-clip`}>
@@ -640,6 +818,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
             width={n(canvas.w)}
             height={n(canvas.h)}
             fill={`url(#${vignetteId})`}
+            data-name="Vignette"
           />
         </Fragment>
       )}
@@ -690,14 +869,20 @@ export function OrbSvg({
 
       {/* Tagged so the transparent-background export can drop it wholesale. */}
       {showBackground && (
-        <g data-role="background">
+        <g data-role="background" data-name="Background">
           <BackgroundView ctx={ctx} />
         </g>
       )}
 
       {doc.orb.visible && doc.orb.mode === 'sliced' && <SlicedOrb ctx={ctx} />}
+      {doc.orb.visible && doc.orb.mode === 'sectors' && <SectorOrb ctx={ctx} />}
 
-      {doc.orb.visible && doc.orb.mode !== 'sliced' && (
+      {doc.orb.visible && doc.orb.mode === 'disc' && doc.solidFills && (
+        // Solid fills: the disc gradient collapses to its mid-ramp ink. The
+        // gradient itself is untouched, so toggling this off restores it.
+        <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={solidFor(doc.orb.gradient, palette)} data-name="Orb disc" />
+      )}
+      {doc.orb.visible && doc.orb.mode === 'disc' && !doc.solidFills && (
         <Fragment>
           {doc.orb.gradient.type === 'conic' ? (
             <ConicSweep
@@ -716,7 +901,7 @@ export function OrbSvg({
                   palette={palette}
                 />
               </defs>
-              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${orbGradId})`} />
+              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${orbGradId})`} data-name="Orb disc" />
             </Fragment>
           )}
         </Fragment>
@@ -740,6 +925,7 @@ export function OrbSvg({
 
       {doc.orb.visible && doc.orb.stroke.enabled && (
         <circle
+          data-name="Outline"
           cx={n(cx)}
           cy={n(cy)}
           r={n(r)}
