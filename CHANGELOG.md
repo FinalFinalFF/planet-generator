@@ -12,7 +12,45 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
-### Changed: the seven hand-authored palettes are commented out
+### Added: `sectors` orb mode — the abstract direction's structure (v2, Phase 1)
+
+Client feedback on the RSAC refresh: the orbs read as literal planet renderings.
+The 2026-08-25 comps (untracked, in `Examples/2026-08-25/`) replace the shaded
+sphere with a **sector collage**: the disc cut by one straight chord into two
+rows, each row cut crosswise into 1–3 hard-edged cells, each cell filled
+independently. This lands as a third `orb.mode` beside `disc` and `sliced`,
+additive only — no existing mode, style, default, or remix weighting was touched,
+and remix cannot produce `sectors` yet (that arrives with the sector styles).
+
+Decisions worth keeping:
+
+- **Cell geometry is derived, not authored** — cells split a row's width evenly;
+  only the chord's angle and offset exist as controls. Same philosophy as the
+  slices' derived radii: the reference look never shows bespoke cell widths, and
+  per-cell geometry would be nine controls nobody asked for.
+- **Ramp fills span the orb's box, not the cell**, so two adjacent ramp cells
+  read as parts of one composition instead of restarting at every seam. Ramp
+  angle is absolute (canvas space) and does not pick up the structure's rotation.
+- **Cells render as pre-rotated absolute paths under a single orb clip — not
+  nested clips.** The first implementation nested `clip-path` groups
+  (orb ∩ cell-rect). The markup was valid and rendered correctly standalone, but
+  Chrome mis-rasterizes nested clip intersections when the host `<svg>` is
+  CSS-scaled — square corners escape the disc — and CSS-scaled is exactly how the
+  editor stage, the batch cells, and any thumbnail render. Found by screenshotting
+  the QA contact sheet (scaled: broken) and the same dumped markup standalone
+  (natural size: correct). `rotatedRectPath` in `geometry.ts` bakes the rotation
+  into path coordinates so one clip level suffices.
+- **`shuffleColors` reaches sector fills**, drawn *after* every existing draw so
+  pre-sector documents shuffle byte-identically. Without this, an orb in sectors
+  mode looked immune to Shuffle colors. The shuffle test's geometry extractor now
+  projects sectors down to angle/offset/cell-counts — fills are colors, structure
+  is geometry — and the assertion was sabotaged once (angle+1 in the shuffle) to
+  confirm it fails when sector geometry moves.
+- **`detectOrbStyle` reports `custom` for sectors** until the sector styles
+  exist; claiming `flat-disc` would be a lie the dropdown acts on.
+- One process note: a careless `git checkout` during test sabotage reverted
+  uncommitted remix edits (the sabotage was done with shell perl instead of a
+  tracked edit). Re-applied. Sabotage via real edits, on committed work.
 
 `ember-terminator`, `pale-sky-brights`, `circuit-jade`, `bauhaus-signal`,
 `violet-drive`, `oxide-dust` and `signal-dark` are commented out rather than

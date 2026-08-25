@@ -15,6 +15,7 @@ import {
   type Palette,
   type PatternLayer,
   type OrbDoc,
+  type SectorFill,
   type ShadingLayer,
 } from '../types'
 import { DEFAULT_LAYER_MASK } from '../lib/defaults'
@@ -27,6 +28,7 @@ import {
   linearEndpoints,
   n,
   polar,
+  rotatedRectPath,
   wedgePath,
   type Box,
 } from '../lib/geometry'
@@ -245,6 +247,88 @@ function SlicedOrb({ ctx }: { ctx: Ctx }) {
         <g style={blendStyle(s.blend)}>{family(1, clamp(s.modulation, 0, 1))}</g>
       )}
     </g>
+  )
+}
+
+/* ---------- sector collage ---------- */
+
+/** A SectorFill ramp as a throwaway two-stop Gradient, for GradientDef. */
+function rampGradient(fill: Extract<SectorFill, { kind: 'ramp' }>): Gradient {
+  return {
+    type: 'linear',
+    angle: fill.angle,
+    stops: [
+      { id: 'a', offset: 0, color: fill.from },
+      { id: 'b', offset: 1, color: fill.to },
+    ],
+    focusX: 0.5,
+    focusY: 0.5,
+    radius: 0.75,
+    segments: 180,
+  }
+}
+
+/**
+ * The abstract sector collage: one chord splits the disc into two rows, each
+ * row splits crosswise into 1–3 evenly sized cells, and every cell paints
+ * independently with a hard edge.
+ *
+ * Geometry lives in a frame where the chord is horizontal: each cell is an
+ * axis-aligned rect there, pre-rotated into place in JS and emitted as one
+ * absolute `<path>` clipped only by the orb circle. Deliberately not a nested
+ * clip (orb ∩ cell): Chrome mis-rasterizes nested clip-path intersections when
+ * the host <svg> is CSS-scaled, which is exactly how the editor stage and the
+ * batch cells render. Ramp gradients stay in absolute canvas space, so a
+ * ramp's angle means the same thing in every cell regardless of `angle`.
+ * Outer cell edges overhang the disc generously — the orb clip trims them —
+ * so only the seams need to be exact.
+ */
+function SectorOrb({ ctx }: { ctx: Ctx }) {
+  const { cx, cy, r, prefix, palette, doc } = ctx
+  const s = doc.orb.sectors
+  const orbBox: Box = { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }
+  const pad = r * 2.2
+  const chordY = cy + clamp(s.offset, -0.95, 0.95) * r
+
+  const rows: SectorFill[][] = [s.rowA, s.rowB].map((row) =>
+    row.length ? row.slice(0, 3) : [{ kind: 'flat', color: { slot: 0 } }],
+  )
+
+  const defs: React.ReactNode[] = []
+  const cells: React.ReactNode[] = []
+  rows.forEach((row, ri) => {
+    const y0 = ri === 0 ? cy - pad : chordY
+    const y1 = ri === 0 ? chordY : cy + pad
+    row.forEach((fill, ci) => {
+      const x0 = ci === 0 ? cx - pad : cx - r + (2 * r * ci) / row.length
+      const x1 = ci === row.length - 1 ? cx + pad : cx - r + (2 * r * (ci + 1)) / row.length
+      const gradId = `${prefix}-secg-${ri}-${ci}`
+      if (fill.kind === 'ramp') {
+        defs.push(
+          <GradientDef
+            key={gradId}
+            id={gradId}
+            gradient={rampGradient(fill)}
+            box={orbBox}
+            palette={palette}
+          />,
+        )
+      }
+      cells.push(
+        <path
+          key={`${ri}-${ci}`}
+          d={rotatedRectPath(x0, y0, x1, y1, s.angle, cx, cy)}
+          fill={fill.kind === 'flat' ? color(fill.color, palette) : `url(#${gradId})`}
+        />,
+      )
+    })
+  })
+
+  return (
+    <Fragment>
+      {defs.length > 0 && <defs>{defs}</defs>}
+      <g clipPath={`url(#${prefix}-orb-clip)`}>{cells}</g>
+    </Fragment>
   )
 }
 
@@ -696,8 +780,9 @@ export function OrbSvg({
       )}
 
       {doc.orb.visible && doc.orb.mode === 'sliced' && <SlicedOrb ctx={ctx} />}
+      {doc.orb.visible && doc.orb.mode === 'sectors' && <SectorOrb ctx={ctx} />}
 
-      {doc.orb.visible && doc.orb.mode !== 'sliced' && (
+      {doc.orb.visible && doc.orb.mode === 'disc' && (
         <Fragment>
           {doc.orb.gradient.type === 'conic' ? (
             <ConicSweep

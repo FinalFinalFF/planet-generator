@@ -24,6 +24,7 @@ import {
   type LayerMask,
   type Orb,
   type OrbMode,
+  type SectorFill,
   type SliceConfig,
   type BlendMode,
   type ColorRef,
@@ -611,5 +612,25 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
     }
   })
 
-  return { ...doc, background, orb, layers }
+  // Sector fills are ColorRefs too, so the shuffle has to reach them — an orb
+  // in sectors mode would otherwise look immune to Shuffle colors. Drawn after
+  // every existing draw, so pre-sector documents shuffle exactly as before.
+  const sectorPool = rng.shuffle(deck.all)
+  let k = 0
+  const nextSlot = () => sectorPool[k++ % sectorPool.length]
+  const shuffleFill = (f: SectorFill): SectorFill =>
+    f.kind === 'flat'
+      ? { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
+      : {
+          ...f,
+          from: { ...f.from, slot: nextSlot(), hex: null },
+          to: { ...f.to, slot: nextSlot(), hex: null },
+        }
+  const sectors = {
+    ...orb.sectors,
+    rowA: orb.sectors.rowA.map(shuffleFill),
+    rowB: orb.sectors.rowB.map(shuffleFill),
+  }
+
+  return { ...doc, background, orb: { ...orb, sectors }, layers }
 }

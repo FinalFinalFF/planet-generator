@@ -88,6 +88,33 @@ export function arcPath(
   return `M${n(p0.x)},${n(p0.y)}A${n(rx)},${n(ry)} ${n(rotation)} ${large},${dir} ${n(p1.x)},${n(p1.y)}`
 }
 
+/**
+ * An axis-aligned rect rotated about (cx, cy), emitted as an absolute path —
+ * no `transform` attribute. Sector cells use this so they need only a single
+ * clip level: Chrome mis-rasterizes *nested* clip-path intersections when the
+ * host <svg> is CSS-scaled (editor stage, batch cells), and a pre-rotated
+ * path clipped once by the orb circle sidesteps that entirely.
+ */
+export function rotatedRectPath(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  angleDeg: number,
+  cx: number,
+  cy: number,
+): string {
+  const a = angleDeg * DEG
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const pt = (x: number, y: number) => {
+    const dx = x - cx
+    const dy = y - cy
+    return `${n(cx + dx * cos - dy * sin)},${n(cy + dx * sin + dy * cos)}`
+  }
+  return `M${pt(x0, y0)}L${pt(x1, y0)}L${pt(x1, y1)}L${pt(x0, y1)}Z`
+}
+
 /** Point on a circle around the orb, for satellite placement. */
 export function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const { dx, dy } = dirFromAngle(angleDeg)

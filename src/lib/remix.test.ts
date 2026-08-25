@@ -152,7 +152,18 @@ describe('a lock is absolute', () => {
     const out = shuffleColors(FIXTURE, palette, 'shuffle-seed')
     const geometry = (d: OrbDoc) =>
       json({
-        orb: { ...d.orb, gradient: { ...d.orb.gradient, stops: null }, stroke: null },
+        orb: {
+          ...d.orb,
+          gradient: { ...d.orb.gradient, stops: null },
+          stroke: null,
+          // Sector fills are colors, and shuffleColors re-deals them; the
+          // structure they hang off is the geometry that must not move.
+          sectors: {
+            angle: d.orb.sectors.angle,
+            offset: d.orb.sectors.offset,
+            cells: [d.orb.sectors.rowA.length, d.orb.sectors.rowB.length],
+          },
+        },
         canvas: d.canvas,
         patternGeometry: patterns(d).map((p) => [p.scale, p.rotation, p.offsetX, p.offsetY, p.fit]),
       })

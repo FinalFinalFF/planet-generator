@@ -13,6 +13,7 @@ import {
   type Orb,
   type OrbDoc,
   type OrbStyle,
+  type SectorConfig,
   type ShadingLayer,
   type SliceConfig,
 } from '../types'
@@ -68,6 +69,32 @@ export const DEFAULT_SLICES: SliceConfig = {
   phase: 0.12,
   // Multiply keeps the base hues; screen washes the whole disc toward white.
   blend: 'multiply',
+}
+
+/**
+ * The default sector collage reads like the 2026-08-25 comps: a light ramp
+ * across the top half, the bottom split into a dark cell and a mid accent.
+ */
+export const DEFAULT_SECTORS: SectorConfig = {
+  angle: 0,
+  offset: 0,
+  rowA: [{ kind: 'ramp', from: ref(5), to: ref(7), angle: 64 }],
+  rowB: [
+    { kind: 'flat', color: ref(0) },
+    { kind: 'flat', color: ref(3) },
+  ],
+}
+
+/**
+ * Sector configs hold arrays of fill objects, so a spread is not enough —
+ * two documents sharing one row array would alias each other's cells.
+ */
+export function cloneSectors(s: SectorConfig): SectorConfig {
+  return {
+    ...s,
+    rowA: s.rowA.map((f) => ({ ...f })),
+    rowB: s.rowB.map((f) => ({ ...f })),
+  }
 }
 
 /* ---------- pattern layer color defaults ---------- */
@@ -274,6 +301,7 @@ export function defaultDoc(seed: string): OrbDoc {
       cy: 0.5,
       radius: 0.62,
       slices: { ...DEFAULT_SLICES },
+      sectors: cloneSectors(DEFAULT_SECTORS),
       // The ember→cream→teal ramp from the reference, read left to right.
       // Linear rather than conic on purpose: a conic's convergence point
       // reads as a pinwheel pinch when it lands on the disc.
@@ -337,6 +365,7 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
     ...base,
     mode: base.mode ?? 'disc',
     slices: { ...DEFAULT_SLICES, ...(base.slices ?? {}) },
+    sectors: { ...cloneSectors(DEFAULT_SECTORS), ...(base.sectors ?? {}) },
   }
   const layers = doc.layers.map((layer) =>
     layer.kind === 'pattern'
@@ -532,6 +561,9 @@ export function applyOrbStyle(doc: OrbDoc, style: OrbStyle): OrbStyleResult {
 
 /** Best-effort read of which style the current document resembles. */
 export function detectOrbStyle(doc: OrbDoc): OrbStyle | 'custom' {
+  // No style produces sectors yet — the abstract styles arrive with the v2
+  // remix work, and until then the honest answer is `custom`.
+  if (doc.orb.mode === 'sectors') return 'custom'
   if (doc.orb.mode === 'sliced') return 'sliced-sweep'
   const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
   const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')

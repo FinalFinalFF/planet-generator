@@ -14,6 +14,8 @@ import {
   type OrbDoc,
   type OrbStyle,
   type Preset,
+  type SectorConfig,
+  type SectorFill,
   type ShadingLayer,
   type SliceConfig,
 } from '../types'
@@ -163,6 +165,152 @@ function SliceControls({
         Keep base opacity near 1 — that is what leaves a crescent of each disc visible.
         Lower it and the bands wash together.
       </div>
+    </>
+  )
+}
+
+/* ---------- sector-collage controls ---------- */
+
+/** A palette-spread starter for a cell added by the row-count control. */
+function defaultSectorFill(palette: Palette, index: number): SectorFill {
+  const count = Math.max(1, palette.colors.length)
+  return { kind: 'flat', color: { slot: (index * 3 + 1) % count } }
+}
+
+function SectorRowEditor({
+  label,
+  row,
+  palette,
+  onChange,
+}: {
+  label: string
+  row: SectorFill[]
+  palette: Palette
+  onChange: (row: SectorFill[]) => void
+}) {
+  const setCount = (count: number) => {
+    const next = row.slice(0, count)
+    while (next.length < count) next.push(defaultSectorFill(palette, next.length + row.length))
+    onChange(next)
+  }
+  const patchCell = (i: number, fill: SectorFill) =>
+    onChange(row.map((f, j) => (j === i ? fill : f)))
+
+  return (
+    <>
+      <Segmented
+        label={`${label} — cells`}
+        value={String(Math.min(3, Math.max(1, row.length)))}
+        options={[
+          { value: '1', label: '1' },
+          { value: '2', label: '2' },
+          { value: '3', label: '3' },
+        ]}
+        onChange={(v) => setCount(Number(v))}
+      />
+      {row.map((fill, i) => (
+        <div key={i}>
+          <Segmented
+            label={`${label} · cell ${i + 1}`}
+            value={fill.kind}
+            options={[
+              { value: 'flat', label: 'flat' },
+              { value: 'ramp', label: 'ramp' },
+            ]}
+            onChange={(kind) => {
+              if (kind === fill.kind) return
+              // Keep the ink when switching kinds, so toggling is not destructive.
+              patchCell(
+                i,
+                kind === 'ramp'
+                  ? {
+                      kind: 'ramp',
+                      from: fill.kind === 'flat' ? fill.color : fill.from,
+                      to: { slot: Math.max(0, palette.colors.length - 1) },
+                      angle: 90,
+                    }
+                  : { kind: 'flat', color: fill.kind === 'ramp' ? fill.from : fill.color },
+              )
+            }}
+          />
+          {fill.kind === 'flat' ? (
+            <ColorRefEditor
+              name="Ink"
+              value={fill.color}
+              palette={palette}
+              onChange={(color) => patchCell(i, { ...fill, color })}
+            />
+          ) : (
+            <>
+              <ColorRefEditor
+                name="Ramp from"
+                value={fill.from}
+                palette={palette}
+                onChange={(from) => patchCell(i, { ...fill, from })}
+              />
+              <ColorRefEditor
+                name="Ramp to"
+                value={fill.to}
+                palette={palette}
+                onChange={(to) => patchCell(i, { ...fill, to })}
+              />
+              <Slider
+                label="Ramp angle"
+                value={fill.angle}
+                min={0}
+                max={360}
+                step={1}
+                suffix="°"
+                onChange={(angle) => patchCell(i, { ...fill, angle })}
+              />
+            </>
+          )}
+        </div>
+      ))}
+    </>
+  )
+}
+
+function SectorControls({
+  sectors,
+  palette,
+  onPatch,
+}: {
+  sectors: SectorConfig
+  palette: Palette
+  onPatch: (patch: Partial<SectorConfig>, coalesce?: string) => void
+}) {
+  return (
+    <>
+      <Slider
+        label="Split angle"
+        value={sectors.angle}
+        min={0}
+        max={360}
+        step={1}
+        suffix="°"
+        onChange={(angle) => onPatch({ angle }, 'sec-angle')}
+      />
+      <Slider
+        label="Split offset"
+        value={sectors.offset}
+        min={-0.9}
+        max={0.9}
+        onChange={(offset) => onPatch({ offset }, 'sec-offset')}
+      />
+      <SectorRowEditor
+        label="Row A"
+        row={sectors.rowA}
+        palette={palette}
+        onChange={(rowA) => onPatch({ rowA })}
+      />
+      <hr className="divider" />
+      <SectorRowEditor
+        label="Row B"
+        row={sectors.rowB}
+        palette={palette}
+        onChange={(rowB) => onPatch({ rowB })}
+      />
     </>
   )
 }
@@ -342,7 +490,7 @@ export function Sidebar(props: SidebarProps) {
       <Section
         num="03"
         title="Orb"
-        hint={doc.orb.mode === 'sliced' ? 'sliced' : doc.orb.gradient.type}
+        hint={doc.orb.mode === 'disc' ? doc.orb.gradient.type : doc.orb.mode}
         open={open.orb}
         onToggle={() => onToggleSection('orb')}
         lock={lockFor('orb')}
@@ -394,6 +542,7 @@ export function Sidebar(props: SidebarProps) {
           options={[
             { value: 'disc', label: 'disc' },
             { value: 'sliced', label: 'sliced' },
+            { value: 'sectors', label: 'sectors' },
           ]}
           onChange={(mode) => update((d) => ({ ...d, orb: { ...d.orb, mode } }))}
         />
@@ -440,17 +589,41 @@ export function Sidebar(props: SidebarProps) {
             <hr className="divider" />
           </>
         )}
-        <div className="eyebrow">
-          {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
-        </div>
-        <GradientEditor
-          gradient={doc.orb.gradient}
-          palette={palette}
-          onChange={(gradient, coalesce) =>
-            update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
-          }
-        />
-        <hr className="divider" />
+        {doc.orb.mode === 'sectors' && (
+          <>
+            <div className="eyebrow">Sectors</div>
+            <div className="note">
+              One chord splits the disc into two rows; each row splits crosswise into equal
+              cells. Every cell paints independently, hard-edged — a collage, not a sphere.
+            </div>
+            <SectorControls
+              sectors={doc.orb.sectors}
+              palette={palette}
+              onPatch={(patch, coalesce) =>
+                update(
+                  (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, ...patch } } }),
+                  coalesce,
+                )
+              }
+            />
+            <hr className="divider" />
+          </>
+        )}
+        {doc.orb.mode !== 'sectors' && (
+          <>
+            <div className="eyebrow">
+              {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
+            </div>
+            <GradientEditor
+              gradient={doc.orb.gradient}
+              palette={palette}
+              onChange={(gradient, coalesce) =>
+                update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
+              }
+            />
+            <hr className="divider" />
+          </>
+        )}
         <Check
           label="Outline"
           checked={doc.orb.stroke.enabled}
