@@ -449,21 +449,21 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
  * geometry, seed and locks are left alone, and hidden layers keep their data
  * so switching back restores them.
  *
- * **Locks are absolute here too**: `locks.orb` or the `orb.type` sub-lock
- * blocks the type change; `locks.patterns` blocks the visibility rewrite.
- * Skipped work is reported so the UI can say so.
+ * **The type change itself is never blocked** — the Type control is the
+ * user's own hand, and locks guard randomizers and macros, never hand-edits
+ * (a type sub-lock pins the *new* value against the next remix). Only the
+ * pattern-visibility side effect defers to `locks.patterns`, since that
+ * writes into another section; it is reported so the UI can say so.
  */
 export type OrbTypeResult = {
   doc: OrbDoc
   /** What a lock kept the switch from touching, for the caller to report. */
-  skipped: ('orb' | 'patterns')[]
+  skipped: 'patterns'[]
 }
 
 export function applyOrbType(doc: OrbDoc, type: OrbType): OrbTypeResult {
-  const typeLocked = doc.locks.orb || doc.subLocks.orb.type
   const skipped: OrbTypeResult['skipped'] = []
-  if (typeLocked) skipped.push('orb')
-  const nextType = typeLocked ? doc.orbType : type
+  const nextType = type
 
   let layers = doc.layers
   const hasPattern = doc.layers.some((l) => l.kind === 'pattern')

@@ -12,6 +12,37 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: per-scope disclosure replaces the global Advanced mode (staging review)
+
+The app-wide Simple/Advanced toggle shipped and was rejected the same day —
+"advanced" is a property of the thing being edited, not of the session. Every
+section and every card (segment cell, pattern layer) now carries its own
+"more settings" toggle (a drawn sliders icon) beside its locks, revealing that
+scope's deep controls in place; a card inherits an opened parent scope so the
+wider toggle never closes a card back down. Disclosure state is ephemeral on
+purpose. Sidebar hierarchy rebuilt in the same pass: cells and layers are
+headed cards on a sunken ground (name + state hint + tools in the head), group
+eyebrows carry a rule, so which-controls-apply-to-what reads at a glance.
+
+Bugs found by the same review, all fixed with regression coverage where the
+suite can see them:
+
+- **Type switching was blocked by its own lock.** `applyOrbType` treated the
+  Type segmented as a macro and refused under `locks.orb`/`orb.type` — but
+  locks guard randomizers, never the user's own hand. The switch now always
+  lands and the lock pins the *new* value against remix (test updated to
+  assert exactly this).
+- **The palette dice defeated "Keep palette".** It only checked the full
+  colors lock; the `colors.palette` sub-lock now pins it too, with a toast.
+- **A fully transparent ink looked like a broken color picker.** Plates ship
+  at alpha 0 by design; the editor now announces "hidden · alpha 0" with a
+  one-tap "show" wherever the alpha slider isn't on screen.
+
+Verified by an interactive Playwright sweep (20 checks: hand-edit-vs-lock
+semantics, existence implication through the orb dice, canvas quick-picks,
+undo, per-scope reveals, brand strip application, typed-seed reproduction,
+shuffle geometry invariance, batch open) with a clean console.
+
 ### Changed: v4 — the mode-first restructure (orb types, the lock tree, RSAC brand)
 
 The whole release follows the product owner's five-step workflow (2026-08-25):

@@ -71,9 +71,6 @@ export default function App() {
       fitToStage: saved?.fitToStage ?? true,
       openSections: saved?.openSections ?? null,
       selectedLayerId: saved?.selectedLayerId ?? null,
-      // Fresh profiles start Simple; a returning profile (any saved UI state)
-      // is grandfathered into Advanced so no one wakes up to missing controls.
-      tier: saved?.tier ?? (saved ? ('advanced' as const) : ('simple' as const)),
     }
   })
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -193,7 +190,6 @@ export default function App() {
       fitToStage: ui.fitToStage,
       openSections: SECTION_KEYS.filter((k) => open[k]),
       selectedLayerId: ui.selectedLayerId,
-      tier: ui.tier,
     }
     pendingUi.current = snapshot
     const t = setTimeout(() => storage.saveUi(snapshot), 300)
@@ -800,8 +796,6 @@ export default function App() {
         onSetLayerPattern={onSetLayerPattern}
         onSetSectorTexture={onSetSectorTexture}
         onSetOrbType={onSetOrbType}
-        tier={ui.tier}
-        onTierChange={(tier) => setUi((u) => ({ ...u, tier }))}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}
         patternOptions={patternOptions}

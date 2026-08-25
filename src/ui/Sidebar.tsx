@@ -31,9 +31,10 @@ import {
   Segmented,
   Select,
   Slider,
+  MoreToggle,
+  Scope,
   TextField,
-  TierContext,
-  type Tier,
+  useTier,
 } from './controls'
 import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
@@ -223,9 +224,6 @@ export type SidebarProps = {
   onRandomizePalette: () => void
   /** Built-in library plus anything imported this session. */
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
-  /** The global Simple / Advanced tier — persisted UI state, never doc state. */
-  tier: Tier
-  onTierChange: (tier: Tier) => void
 }
 
 /* ---------- small chrome ---------- */
@@ -293,6 +291,10 @@ function SectorRowEditor({
   onChange: (row: SectorFill[]) => void
   onSetTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
 }) {
+  // Per-cell disclosure, inheriting an opened parent scope (the Orb section's
+  // own "more settings") so the wider toggle never closes a card back down.
+  const parentAdvanced = useTier() === 'advanced'
+  const [moreCells, setMoreCells] = useState<Record<number, boolean>>({})
   const setCount = (count: number) => {
     const next = row.slice(0, count)
     while (next.length < count) next.push(defaultSectorFill(palette, next.length + row.length))
@@ -306,8 +308,9 @@ function SectorRowEditor({
 
   return (
     <>
+      <div className="eyebrow">{label}</div>
       <Segmented
-        label={`${label} — cells`}
+        label="Cells"
         value={String(Math.min(3, Math.max(1, row.length)))}
         options={[
           { value: '1', label: '1' },
@@ -319,39 +322,44 @@ function SectorRowEditor({
       {row.map((fill, i) => {
         const parsed = fill.kind === 'texture' ? parsedById.get(fill.patternId) : undefined
         return (
-          <div key={i}>
+          <Scope key={i} advanced={parentAdvanced || !!moreCells[i]}>
+          <div className="layercard">
+            <div className="layercard__head">
+              <span className="layercard__title">Cell {i + 1}</span>
+              <span className="layercard__hint">{fill.kind}</span>
+              <MoreToggle
+                on={parentAdvanced || !!moreCells[i]}
+                what={`${label} cell ${i + 1}`}
+                onToggle={(on) => setMoreCells((m) => ({ ...m, [i]: on }))}
+              />
+              <AdvLock
+                on={!!fill.locks?.fill}
+                title="Lock the fill: remix keeps this cell's kind and texture."
+                onToggle={(on) =>
+                  patchCell(i, { ...fill, locks: { ...fill.locks, fill: on } })
+                }
+              />
+              <AdvLock
+                on={!!fill.locks?.color}
+                title="Lock the inks: remix keeps this cell's palette-slot assignments."
+                onToggle={(on) =>
+                  patchCell(i, { ...fill, locks: { ...fill.locks, color: on } })
+                }
+              />
+              <ObjectLockChip
+                locks={fill.locks}
+                vocabulary={CELL_PROPS}
+                what="segment"
+                onChange={(locks) => patchCell(i, { ...fill, locks })}
+              />
+            </div>
             <Segmented
-              label={`${label} · cell ${i + 1}`}
               value={fill.kind}
               options={[
                 { value: 'flat', label: 'flat' },
                 { value: 'ramp', label: 'ramp' },
                 { value: 'texture', label: 'texture' },
               ]}
-              tools={
-                <>
-                  <AdvLock
-                    on={!!fill.locks?.fill}
-                    title="Lock the fill: remix keeps this cell's kind and texture."
-                    onToggle={(on) =>
-                      patchCell(i, { ...fill, locks: { ...fill.locks, fill: on } })
-                    }
-                  />
-                  <AdvLock
-                    on={!!fill.locks?.color}
-                    title="Lock the inks: remix keeps this cell's palette-slot assignments."
-                    onToggle={(on) =>
-                      patchCell(i, { ...fill, locks: { ...fill.locks, color: on } })
-                    }
-                  />
-                  <ObjectLockChip
-                    locks={fill.locks}
-                    vocabulary={CELL_PROPS}
-                    what="segment"
-                    onChange={(locks) => patchCell(i, { ...fill, locks })}
-                  />
-                </>
-              }
               onChange={(kind) => {
                 if (kind === fill.kind) return
                 if (kind === 'texture') {
@@ -493,6 +501,7 @@ function SectorRowEditor({
               </>
             )}
           </div>
+          </Scope>
         )
       })}
     </>
@@ -648,6 +657,7 @@ function FillEditor({
 
 function OrbSection(props: SidebarProps) {
   const { doc, palette, parsedById, open, onToggleSection, update, onRandomizeSection } = props
+  const [more, setMore] = useState(false)
 
   const patchOrb = (patch: Partial<OrbDoc['orb']>, coalesce?: string) =>
     update((d) => ({ ...d, orb: { ...d.orb, ...patch } }), coalesce)
@@ -690,6 +700,7 @@ function OrbSection(props: SidebarProps) {
         onRandomize: () => onRandomizeSection('orb'),
         disabled: doc.locks.orb,
       }}
+      more={{ on: more, onToggle: setMore }}
     >
       <Segmented
         label="Type"
@@ -902,6 +913,8 @@ function PatternPanel(props: SidebarProps) {
   const patternLayers = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
   const visible = patternLayers.filter((l) => l.visible)
   const [addId, setAddId] = useState(props.patternOptions[0]?.id ?? '')
+  const parentAdvanced = useTier() === 'advanced'
+  const [moreLayers, setMoreLayers] = useState<Record<string, boolean>>({})
 
   const patch = (id: string, recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) =>
     update(
@@ -969,7 +982,8 @@ function PatternPanel(props: SidebarProps) {
         </div>
       )}
       {patternLayers.map((layer, i) => (
-        <div key={layer.id} className="layercard">
+        <Scope key={layer.id} advanced={parentAdvanced || !!moreLayers[layer.id]}>
+        <div className="layercard">
           <div className="layercard__head">
             <button
               type="button"
@@ -980,7 +994,12 @@ function PatternPanel(props: SidebarProps) {
               {layer.visible ? '●' : '○'}
             </button>
             <span className="layercard__title">Layer {i + 1}</span>
-            <span className="section__hint">{layer.name}</span>
+            <span className="layercard__hint">{layer.name}</span>
+            <MoreToggle
+              on={parentAdvanced || !!moreLayers[layer.id]}
+              what={`layer ${i + 1}`}
+              onToggle={(on) => setMoreLayers((m) => ({ ...m, [layer.id]: on }))}
+            />
             <ObjectLockChip
               locks={layer.locks}
               vocabulary={LAYER_PROPS}
@@ -999,6 +1018,7 @@ function PatternPanel(props: SidebarProps) {
             />
           )}
         </div>
+        </Scope>
       ))}
       {visible.length < 2 && (
         <Field label="Add pattern layer">
@@ -1851,6 +1871,7 @@ function AccentControls({
 
 function AccentsSection(props: SidebarProps) {
   const { doc, palette, open, onToggleSection, update, onRandomizeSection } = props
+  const [more, setMore] = useState(false)
   const layer = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
   const patch = (recipe: (l: AccentLayer) => AccentLayer, coalesce?: string) => {
     if (!layer) return
@@ -1896,10 +1917,11 @@ function AccentsSection(props: SidebarProps) {
         onRandomize: () => onRandomizeSection('accents'),
         disabled: doc.locks.accents,
       }}
+      more={{ on: more, onToggle: setMore }}
     >
       {!layer ? (
         <div className="note">
-          No accent layer yet. Add one from Orb → Stack (Advanced) → + Accents.
+          No accent layer yet. Add one from Orb → more settings → Stack → + Accents.
         </div>
       ) : (
         <>
@@ -1916,6 +1938,24 @@ function AccentsSection(props: SidebarProps) {
           <AccentControls layer={layer} palette={palette} onPatch={patch} suppressRim={doc.flat} />
         </>
       )}
+    </Section>
+  )
+}
+
+/* ---------- 05 Export ---------- */
+
+function ExportSection(props: SidebarProps) {
+  const { open, onToggleSection } = props
+  const [more, setMore] = useState(false)
+  return (
+    <Section
+      num="05"
+      title="Export"
+      open={open.export}
+      onToggle={() => onToggleSection('export')}
+      more={{ on: more, onToggle: setMore }}
+    >
+      <ExportPanel {...props.exportPanel} />
     </Section>
   )
 }
@@ -1939,6 +1979,7 @@ function bgQuickOf(doc: OrbDoc): BgQuick {
 
 function CanvasSection(props: SidebarProps) {
   const { doc, palette, open, onToggleSection, update, onRandomizeSection } = props
+  const [more, setMore] = useState(false)
   const quick = bgQuickOf(doc)
   const bgLabel =
     quick === 'custom' ? doc.background.kind : quick === 'transparent' ? 'transp.' : quick
@@ -1995,6 +2036,7 @@ function CanvasSection(props: SidebarProps) {
         onRandomize: () => onRandomizeSection('background'),
         disabled: doc.locks.background,
       }}
+      more={{ on: more, onToggle: setMore }}
     >
       <Segmented
         label="Background"
@@ -2096,23 +2138,13 @@ function CanvasSection(props: SidebarProps) {
 
 export function Sidebar(props: SidebarProps) {
   const { doc, palette, open, onToggleSection, update } = props
+  const [paletteMore, setPaletteMore] = useState(false)
 
   return (
-    <TierContext.Provider value={props.tier}>
+    // Disclosure is per section and per card — each scope's "more settings"
+    // toggle sits beside its lock. There is deliberately no app-wide mode.
+    <Scope advanced={false}>
       <aside className="sidebar">
-        {/* Sticky and always visible, so "there is more" stays discoverable.
-            Simple is the remix loop; Advanced is everything. */}
-        <div className="tierbar">
-          <Segmented
-            value={props.tier}
-            options={[
-              { value: 'simple', label: 'Simple' },
-              { value: 'advanced', label: 'Advanced' },
-            ]}
-            onChange={props.onTierChange}
-          />
-        </div>
-
         {/* 01 — Orb */}
         <OrbSection {...props} />
 
@@ -2136,6 +2168,7 @@ export function Sidebar(props: SidebarProps) {
             onRandomize: props.onRandomizePalette,
             disabled: doc.locks.colors,
           }}
+          more={{ on: paletteMore, onToggle: setPaletteMore }}
         >
           <Check
             label="Keep palette — remix still re-deals inks within it"
@@ -2179,15 +2212,8 @@ export function Sidebar(props: SidebarProps) {
         <CanvasSection {...props} />
 
         {/* 05 — Export */}
-        <Section
-          num="05"
-          title="Export"
-          open={open.export}
-          onToggle={() => onToggleSection('export')}
-        >
-          <ExportPanel {...props.exportPanel} />
-        </Section>
+        <ExportSection {...props} />
       </aside>
-    </TierContext.Provider>
+    </Scope>
   )
 }

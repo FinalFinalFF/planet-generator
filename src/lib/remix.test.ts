@@ -625,16 +625,18 @@ describe('applyOrbType respects the lock tree', () => {
     expect(patterns(back.doc).filter((l) => l.visible).length).toBeGreaterThan(0)
   })
 
-  it('a locked orb or type sub-lock blocks the switch and reports it', () => {
-    const locked = { ...withLocks({ orb: true }) }
-    const out = applyOrbType(locked, 'segments')
-    expect(out.doc.orbType).toBe(locked.orbType)
-    expect(out.skipped).toContain('orb')
-
-    const sub = withSubLocks({ orb: { type: true } })
-    const out2 = applyOrbType(sub, 'segments')
-    expect(out2.doc.orbType).toBe(sub.orbType)
-    expect(out2.skipped).toContain('orb')
+  it('locks never block the switch itself — the Type control is a hand edit', () => {
+    // A type sub-lock (or section lock) pins the value against REMIX, not
+    // against the user's own hand: switch while locked, and the lock now
+    // guards the new value.
+    const sub = { ...withSubLocks({ orb: { type: true } }), orbType: 'pattern' as const }
+    const out = applyOrbType(sub, 'segments')
+    expect(out.doc.orbType).toBe('segments')
+    for (const seed of SEEDS) {
+      expect(remix(out.doc, seed, deps).orbType).toBe('segments')
+    }
+    const locked = withLocks({ orb: true })
+    expect(applyOrbType(locked, 'segments').doc.orbType).toBe('segments')
   })
 
   it('locked patterns keep their visibility and report it', () => {

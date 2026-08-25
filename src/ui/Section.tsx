@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { LockSection } from '../types'
+import { MoreToggle, Scope } from './controls'
 
 /**
  * Round-arrow icon. Drawn rather than set as a glyph: `⟳` renders as a faint
@@ -46,6 +47,7 @@ export function Section({
   onToggle,
   lock,
   randomize,
+  more,
   children,
 }: {
   num: string
@@ -53,6 +55,13 @@ export function Section({
   hint?: string
   open: boolean
   onToggle: () => void
+  /**
+   * When present, renders the section's "more settings" toggle beside the
+   * lock, and scopes the body's Adv-gated controls to it. Disclosure is
+   * per-section by design (a global Advanced mode was tried and rejected);
+   * cards inside a section can nest their own tighter scopes.
+   */
+  more?: { on: boolean; onToggle: (on: boolean) => void }
   /**
    * When present, renders the section's remix lock next to the title.
    * `partial` counts the active sub-locks and property locks underneath —
@@ -82,6 +91,7 @@ export function Section({
         <span className="section__num">{num}</span>
         <span className="section__title">{title}</span>
         {hint && <span className="section__hint">{hint}</span>}
+        {more && open && <MoreToggle on={more.on} what={title.toLowerCase()} onToggle={more.onToggle} />}
         {randomize && (
           // A span, not a button: the section header is itself a button and
           // nesting one inside it is invalid.
@@ -136,7 +146,11 @@ export function Section({
         )}
         <span className="section__chev">{open ? '▾' : '▸'}</span>
       </button>
-      {open && <div className="section__body">{children}</div>}
+      {open && (
+        <div className="section__body">
+          {more ? <Scope advanced={more.on}>{children}</Scope> : children}
+        </div>
+      )}
     </section>
   )
 }

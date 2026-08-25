@@ -8,25 +8,82 @@ import { clamp, normalizeHex } from '../lib/color'
 import { refAlpha, resolveColor } from '../lib/palettes'
 import type { ColorRef, Palette } from '../types'
 
-/* ---------- the Simple / Advanced tier ---------- */
+/* ---------- per-scope advanced disclosure ---------- */
 
 export type Tier = 'simple' | 'advanced'
 
 /**
- * One global tier, not per-section: depth need is a property of the person and
- * session, not of a section. Mode-dependence hides what is *irrelevant*; this
- * hides what is *deep*. Defaulting to `advanced` here is deliberate — anything
- * rendered outside the provider (tests, stray composition) shows everything
- * rather than silently hiding controls.
+ * Advanced disclosure is **per scope, not app-wide** (2026-08-25 review — a
+ * global mode was tried and rejected): each section and each card (a segment
+ * cell, a pattern layer) carries its own "more settings" toggle next to its
+ * lock, and opening one reveals only that scope's deep controls, in place.
+ * Nested providers do the scoping — a cell's toggle overrides its section's.
+ * Defaulting to `advanced` here is deliberate: anything rendered outside a
+ * provider (tests, stray composition) shows everything rather than silently
+ * hiding controls.
  */
 export const TierContext = createContext<Tier>('advanced')
 
 export const useTier = (): Tier => useContext(TierContext)
 
-/** Renders its children in the Advanced tier only. Interleave in place —
- *  advanced controls belong where their siblings are, not in a ghetto. */
+/** Renders its children only when the nearest scope is opened to Advanced.
+ *  Interleave in place — deep controls belong where their siblings are. */
 export function Adv({ children }: { children: ReactNode }) {
   return useTier() === 'advanced' ? <>{children}</> : null
+}
+
+/** Wraps a scope (a card, a block) in its own disclosure state. */
+export function Scope({ advanced, children }: { advanced: boolean; children: ReactNode }) {
+  return (
+    <TierContext.Provider value={advanced ? 'advanced' : 'simple'}>
+      {children}
+    </TierContext.Provider>
+  )
+}
+
+/**
+ * The "more settings" toggle: a drawn 13px sliders icon (font glyphs die at
+ * this size), sitting with the locks it belongs beside. Accent when open.
+ */
+export function MoreToggle({
+  on,
+  what,
+  onToggle,
+}: {
+  on: boolean
+  what: string
+  onToggle: (on: boolean) => void
+}) {
+  return (
+    // A span with role=button, not a <button>: it also renders inside the
+    // Section header, which is itself a button — nesting one is invalid.
+    <span
+      role="button"
+      tabIndex={0}
+      className={`more${on ? ' more--on' : ''}`}
+      title={on ? `Hide the advanced ${what} settings` : `Show all ${what} settings`}
+      aria-pressed={on}
+      aria-label={`Advanced ${what} settings`}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle(!on)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          e.stopPropagation()
+          onToggle(!on)
+        }
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="10.5" cy="4.5" r="1.9" fill="var(--ff-surface)" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="5.5" cy="8" r="1.9" fill="var(--ff-surface)" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="8.5" cy="11.5" r="1.9" fill="var(--ff-surface)" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    </span>
+  )
 }
 
 export function Field({

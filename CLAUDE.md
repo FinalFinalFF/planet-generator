@@ -215,14 +215,20 @@ Vocabulary is deliberately short — the admission test is "would a user say
 this sentence?" ("lock the size", "keep it segments"), not "is this a field?".
 Do not grow it one field at a time.
 
-The sidebar has one global **Simple/Advanced tier** (`TierContext` in
-`controls.tsx`, persisted in `storage.saveUi`, never in the doc). Simple is the
-remix loop; Advanced is everything — a strict superset, interleaved in place.
-Two primitive-level rules do most of the tiering: `ColorRefEditor` shows only
-the slot strip in Simple (hex override + alpha are Advanced), and
-`GradientEditor` hides per-stop editing. When an Advanced-only value visibly
-affects the render (a mask, a non-normal blend), Simple shows a passive note —
-hidden state that changes pixels must never be invisible.
+Advanced disclosure is **per scope, not app-wide** (a global Simple/Advanced
+mode shipped briefly and was rejected in review the same day): every section
+and every card (a segment cell, a pattern layer) carries its own "more
+settings" toggle (`MoreToggle` + nested `TierContext` scopes in
+`controls.tsx`) beside its lock, revealing only that scope's deep controls in
+place. A card inherits an opened parent scope (`parent || own`), so the wider
+toggle never closes a card back down. Disclosure state is ephemeral component
+state, deliberately unpersisted. Two primitive-level rules do most of the
+tiering: `ColorRefEditor` shows only the slot strip in a simple scope (hex
+override + alpha are advanced; a fully transparent ink announces itself with a
+one-tap "show"), and `GradientEditor` hides per-stop editing. When an
+advanced-only value visibly affects the render (a mask, a non-normal blend),
+the simple scope shows a passive note — hidden state that changes pixels must
+never be invisible.
 
 ### Flat mode
 

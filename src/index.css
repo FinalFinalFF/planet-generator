@@ -734,11 +734,16 @@ textarea {
 }
 
 .eyebrow {
+  display: flow-root;
   font-family: var(--ff-font-mono);
   font-size: 10px;
-  letter-spacing: -0.1px;
-  color: var(--ff-text-muted);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ff-text);
   text-transform: uppercase;
+  margin-top: var(--space-1);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--ff-divider);
 }
 
 .toast {
@@ -874,17 +879,6 @@ textarea {
 
 /* ---------- v4: tier bar, constraint chips, layer cards ---------- */
 
-/* Sticky above the sections so "there is more" stays discoverable at any
-   scroll position. Same surface as the sidebar, hard 1px divider below. */
-.tierbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  padding: var(--space-2) var(--space-3);
-  background: var(--ff-surface);
-  border-bottom: 1px solid var(--ff-divider);
-}
-
 .chiprow {
   display: flex;
   flex-wrap: wrap;
@@ -917,25 +911,54 @@ textarea {
   outline-offset: 1px;
 }
 
-/* One pattern layer's editing card inside the Pattern type panel. */
+/* A card scopes one object's controls — a pattern layer, a segment cell.
+   Sunken ground + headed border so "which controls belong to what" reads at
+   a glance; the head carries the object's name, state hint, and its tools
+   (more-settings, padlocks, lock chip). */
 .layercard {
-  border: 1px solid var(--ff-divider-soft);
-  padding: var(--space-2);
+  background: var(--ff-field-alt);
+  border: 1px solid var(--ff-divider);
+  padding: var(--space-2) 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .layercard__head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
+  padding-bottom: 8px;
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-bottom: 1px solid var(--ff-divider-soft);
 }
 
 .layercard__title {
   font-family: var(--ff-font-mono);
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--ff-text);
+}
+
+.layercard__hint {
+  flex: 1;
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  color: var(--ff-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inputs sit on the card's sunken ground, so they need their own surface. */
+.layercard .text,
+.layercard .num,
+.layercard .select {
+  background: var(--ff-surface);
 }
 
 /* Inline tools on an eyebrow row (the Advanced Shading block header). */
@@ -1063,4 +1086,29 @@ textarea {
   height: 10px;
   display: inline-block;
   border: 1px solid var(--ff-divider-soft);
+}
+
+/* The per-scope "more settings" toggle — sits with the locks it belongs beside. */
+.more {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: var(--ff-text-muted);
+  cursor: pointer;
+}
+
+.more:hover {
+  color: var(--ff-text);
+}
+
+.more--on {
+  color: var(--ff-accent);
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--ff-accent);
+  outline-offset: 1px;
 }
