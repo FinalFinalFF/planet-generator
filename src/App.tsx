@@ -270,11 +270,14 @@ export default function App() {
   )
 
   const onRandomizePalette = useCallback(() => {
+    // Both the full colors lock and the keep-palette sub-lock pin the palette
+    // choice — a lock is absolute, the dice included.
     if (doc.locks.colors) return notify('Colors are locked', true)
+    if (doc.subLocks.colors.palette) return notify('Palette is kept — uncheck “Keep palette” to switch', true)
     const next = pickPalette(palettes, randomSeed(), doc.paletteId)
     rawUpdate((d) => ({ ...d, paletteId: next.id }))
     notify(`Palette: ${next.name}`)
-  }, [doc.locks.colors, palettes, doc.paletteId, rawUpdate, notify])
+  }, [doc.locks.colors, doc.subLocks.colors.palette, palettes, doc.paletteId, rawUpdate, notify])
 
   const doShuffleColors = useCallback(() => {
     if (doc.locks.colors) return notify('Colors are locked', true)

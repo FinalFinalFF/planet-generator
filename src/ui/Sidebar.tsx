@@ -2138,7 +2138,7 @@ export function Sidebar(props: SidebarProps) {
           }}
         >
           <Check
-            label="Keep palette on Remix All"
+            label="Keep palette — remix still re-deals inks within it"
             checked={doc.subLocks.colors.palette}
             onChange={(palette) =>
               update((d) => ({
@@ -2147,6 +2147,12 @@ export function Sidebar(props: SidebarProps) {
               }))
             }
           />
+          {doc.subLocks.colors.palette && !doc.locks.colors && (
+            <div className="note">
+              Remix All stays on this palette but re-deals which of its colors everything
+              wears. To freeze every color assignment too, use the section LOCK above.
+            </div>
+          )}
           <Segmented
             label="Color via"
             value={doc.colorSource}
