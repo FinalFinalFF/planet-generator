@@ -12,6 +12,27 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: second texture wave, mined from the older reference boards
+
+Four more generators in `src/lib/patterns/textures/`, sourced from `Examples/`
+material that predates the 2026-08-25 comps: **wave** (op-art sine/zigzag rule
+fields — the `c4926aa5` poster and two panels of the `d8a9d0db` board), **dots**
+(halftone grids with ping-pong size ramps — the board's dissolving-dot panel and
+the `abfd55d93` halftone arcs), **stipple** (seeded organic spatter with
+clustered placement and polygon splats for the large spots — `image 20`'s paint
+speckle, which is also the grain in the client comps that dither's blocky
+glitch never matched), and **hatch** (45° pinstripe families with density
+banding and a crosshatch weave — the board's bottom panels).
+
+Considered and dropped: the board's offset-brick stripes and diagonal shards —
+steps and dither already own that territory, and near-duplicate textures just
+dilute the remix pool. Same architecture as the first wave (ordinary pattern
+sources, same contract), so registration was one import block in
+`procedural.ts`. Tiling notes worth keeping: a dot-size ramp only tiles if it
+ping-pongs; a 45° hatch only tiles when its stripe offsets are periodic in
+x±y mod the tile; wave fields need whole wave/envelope/phase periods per tile.
+The library is now 18 file patterns + 23 procedural variants.
+
 ### Changed: v2 goes flat-first — remix and defaults stop producing rendered lighting
 
 Client feedback on the Phase 3 remix grid: disc-mode results still came out as

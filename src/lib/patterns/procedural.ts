@@ -15,6 +15,10 @@ import { RINGS_VARIANTS, ringsSvg } from './textures/rings'
 import { RULES_VARIANTS, rulesSvg } from './textures/rules'
 import { DITHER_VARIANTS, ditherSvg } from './textures/dither'
 import { STEPS_VARIANTS, stepsSvg } from './textures/steps'
+import { WAVE_VARIANTS, waveSvg } from './textures/wave'
+import { DOTS_VARIANTS, dotsSvg } from './textures/dots'
+import { STIPPLE_VARIANTS, stippleSvg } from './textures/stipple'
+import { HATCH_VARIANTS, hatchSvg } from './textures/hatch'
 
 export const PROCEDURAL_SOURCES: PatternSource[] = [
   ...RINGS_VARIANTS.map((v) => ({
@@ -36,5 +40,28 @@ export const PROCEDURAL_SOURCES: PatternSource[] = [
     id: v.id,
     name: v.name,
     load: () => Promise.resolve(stepsSvg(v.params)),
+  })),
+  // The second wave, mined from the older reference boards (see CHANGELOG):
+  // wave/zigzag rule fields, ramped halftone dots, organic stipple grain,
+  // diagonal pinstripe crosshatch.
+  ...WAVE_VARIANTS.map((v) => ({
+    id: v.id,
+    name: v.name,
+    load: () => Promise.resolve(waveSvg(v.params)),
+  })),
+  ...DOTS_VARIANTS.map((v) => ({
+    id: v.id,
+    name: v.name,
+    load: () => Promise.resolve(dotsSvg(v.params)),
+  })),
+  ...STIPPLE_VARIANTS.map((v) => ({
+    id: v.id,
+    name: v.name,
+    load: () => Promise.resolve(stippleSvg(v.params)),
+  })),
+  ...HATCH_VARIANTS.map((v) => ({
+    id: v.id,
+    name: v.name,
+    load: () => Promise.resolve(hatchSvg(v.params)),
   })),
 ]
