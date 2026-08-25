@@ -53,8 +53,19 @@ export function Section({
   hint?: string
   open: boolean
   onToggle: () => void
-  /** When present, renders the section's remix lock next to the title. */
-  lock?: { section: LockSection; on: boolean; onToggle: (on: boolean) => void }
+  /**
+   * When present, renders the section's remix lock next to the title.
+   * `partial` counts the active sub-locks and property locks underneath —
+   * the chip reads LOCK·n while the section itself is unlocked, and its
+   * tooltip enumerates what is frozen.
+   */
+  lock?: {
+    section: LockSection
+    on: boolean
+    onToggle: (on: boolean) => void
+    partial?: number
+    partialTitle?: string
+  }
   /** When present, renders a dice that randomizes only this section. */
   randomize?: { label: string; onRandomize: () => void; disabled?: boolean }
   children: ReactNode
@@ -100,8 +111,12 @@ export function Section({
           <span
             role="button"
             tabIndex={0}
-            className={`lock${lock.on ? ' lock--on' : ''}`}
-            title={lockTitle(lock.section, lock.on)}
+            className={`lock${lock.on ? ' lock--on' : ''}${!lock.on && (lock.partial ?? 0) > 0 ? ' lock--partial' : ''}`}
+            title={
+              !lock.on && (lock.partial ?? 0) > 0 && lock.partialTitle
+                ? lock.partialTitle
+                : lockTitle(lock.section, lock.on)
+            }
             aria-label={`${lock.on ? 'Unlock' : 'Lock'} ${title} for remix`}
             aria-pressed={lock.on}
             onClick={(e) => {
@@ -116,7 +131,7 @@ export function Section({
               }
             }}
           >
-            {lock.on ? 'LOCKED' : 'LOCK'}
+            {lock.on ? 'LOCKED' : (lock.partial ?? 0) > 0 ? `LOCK·${lock.partial}` : 'LOCK'}
           </span>
         )}
         <span className="section__chev">{open ? '▾' : '▸'}</span>

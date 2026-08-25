@@ -950,3 +950,47 @@ textarea {
   height: 18px;
   font-size: 9px;
 }
+
+/* Property padlock: 11px drawn glyph on the control it guards. */
+.proplock {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--ff-text-muted);
+  cursor: pointer;
+}
+
+.proplock:hover {
+  color: var(--ff-text);
+}
+
+.proplock--on {
+  color: var(--ff-accent);
+}
+
+/* Covered by a parent lock (section lock or existence implication). */
+.proplock--implied {
+  color: var(--ff-accent);
+  opacity: 0.45;
+}
+
+.proplock:focus-visible {
+  outline: 2px solid var(--ff-accent);
+  outline-offset: 1px;
+}
+
+/* Partial section/object lock: outline chip, accent text, sub-lock count. */
+.lock--partial {
+  border-color: var(--ff-accent);
+  color: var(--ff-accent);
+}
+
+.field__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

@@ -27,6 +27,7 @@ import {
   Field,
   Inert,
   NumberField,
+  PropLock,
   Segmented,
   Select,
   Slider,
@@ -39,6 +40,74 @@ import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
 import { DEFAULT_LAYER_MASK, nextId } from '../lib/defaults'
+import type { CellPropertyLock, LayerPropertyLock, PropertyLocks } from '../types'
+
+/* ---------- lock-tree helpers ---------- */
+
+const LAYER_PROPS: LayerPropertyLock[] = ['pattern', 'color', 'scale', 'position', 'rotation']
+const CELL_PROPS: CellPropertyLock[] = ['fill', 'color', 'scale', 'rotation']
+
+const countLocks = (locks: Partial<Record<string, boolean>> | undefined): number =>
+  locks ? Object.values(locks).filter(Boolean).length : 0
+
+const anyLock = (obj: { locks?: Partial<Record<string, boolean>> }): boolean =>
+  countLocks(obj.locks) > 0
+
+/** A property padlock that exists in the Advanced tier only — "maximum
+ *  tuning" is definitionally advanced. Object-level chips stay in Simple. */
+function AdvLock(props: Parameters<typeof PropLock>[0]) {
+  return (
+    <Adv>
+      <PropLock {...props} />
+    </Adv>
+  )
+}
+
+/**
+ * The object-level lock chip on a layer or cell card. None → all on;
+ * some or all → clear. Partial state reads LOCK·n.
+ */
+function ObjectLockChip<K extends string>({
+  locks,
+  vocabulary,
+  what,
+  onChange,
+}: {
+  locks: PropertyLocks<K> | undefined
+  vocabulary: K[]
+  what: string
+  onChange: (locks: PropertyLocks<K> | undefined) => void
+}) {
+  const n = countLocks(locks)
+  const full = n === vocabulary.length
+  const label = full ? 'LOCKED' : n > 0 ? `LOCK·${n}` : 'LOCK'
+  const active = vocabulary.filter((k) => locks?.[k])
+  return (
+    <button
+      type="button"
+      className={`lock lock--mini${full ? ' lock--on' : ''}${!full && n > 0 ? ' lock--partial' : ''}`}
+      title={
+        n === 0
+          ? `Freeze this ${what} against Remix — its own dice and the section dice included. Colors still follow the palette.`
+          : full
+            ? `This ${what} is frozen. Click to unlock everything on it.`
+            : `Frozen on this ${what}: ${active.join(', ')}. Click to freeze it entirely.`
+      }
+      aria-pressed={n > 0}
+      onClick={() =>
+        onChange(
+          n > 0 && !full
+            ? Object.fromEntries(vocabulary.map((k) => [k, true])) as PropertyLocks<K>
+            : full
+              ? undefined
+              : (Object.fromEntries(vocabulary.map((k) => [k, true])) as PropertyLocks<K>),
+        )
+      }
+    >
+      {label}
+    </button>
+  )
+}
 
 const BLEND_OPTIONS = BLEND_MODES.map((b) => ({ value: b, label: b }))
 const MASK_OPTIONS = MASK_MODES.map((m) => ({
@@ -182,6 +251,30 @@ function SectorRowEditor({
                 { value: 'ramp', label: 'ramp' },
                 { value: 'texture', label: 'texture' },
               ]}
+              tools={
+                <>
+                  <AdvLock
+                    on={!!fill.locks?.fill}
+                    title="Lock the fill: remix keeps this cell's kind and texture."
+                    onToggle={(on) =>
+                      patchCell(i, { ...fill, locks: { ...fill.locks, fill: on } })
+                    }
+                  />
+                  <AdvLock
+                    on={!!fill.locks?.color}
+                    title="Lock the inks: remix keeps this cell's palette-slot assignments."
+                    onToggle={(on) =>
+                      patchCell(i, { ...fill, locks: { ...fill.locks, color: on } })
+                    }
+                  />
+                  <ObjectLockChip
+                    locks={fill.locks}
+                    vocabulary={CELL_PROPS}
+                    what="segment"
+                    onChange={(locks) => patchCell(i, { ...fill, locks })}
+                  />
+                </>
+              }
               onChange={(kind) => {
                 if (kind === fill.kind) return
                 if (kind === 'texture') {
@@ -258,6 +351,15 @@ function SectorRowEditor({
                       value={fill.scale}
                       min={0.2}
                       max={4}
+                      tools={
+                        <AdvLock
+                          on={!!fill.locks?.scale}
+                          title="Lock the texture scale against remix."
+                          onToggle={(on) =>
+                            patchCell(i, { ...fill, locks: { ...fill.locks, scale: on } })
+                          }
+                        />
+                      }
                       onChange={(scale) => patchCell(i, { ...fill, scale })}
                     />
                     <Slider
@@ -267,6 +369,15 @@ function SectorRowEditor({
                       max={360}
                       step={1}
                       suffix="°"
+                      tools={
+                        <AdvLock
+                          on={!!fill.locks?.rotation}
+                          title="Lock the texture rotation against remix."
+                          onToggle={(on) =>
+                            patchCell(i, { ...fill, locks: { ...fill.locks, rotation: on } })
+                          }
+                        />
+                      }
                       onChange={(rotation) => patchCell(i, { ...fill, rotation })}
                     />
                   </div>
@@ -444,6 +555,23 @@ function OrbSection(props: SidebarProps) {
   const patchOrb = (patch: Partial<OrbDoc['orb']>, coalesce?: string) =>
     update((d) => ({ ...d, orb: { ...d.orb, ...patch } }), coalesce)
 
+  const sub = doc.subLocks.orb
+  const setSub = (key: keyof typeof sub) => (on: boolean) =>
+    update((d) => ({
+      ...d,
+      subLocks: { ...d.subLocks, orb: { ...d.subLocks.orb, [key]: on } },
+    }))
+  // Existence implication: any locked cell pins the structure.
+  const cellsLocked =
+    [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB].filter(anyLock).length
+  const activeSubs = (['type', 'size', 'position', 'structure'] as const).filter((k) => sub[k])
+  const partial = activeSubs.length + cellsLocked
+  const partialTitle =
+    `Remix may change the orb except: ${[
+      ...activeSubs,
+      ...(cellsLocked > 0 ? [`${cellsLocked} locked segment${cellsLocked === 1 ? '' : 's'} (structure pinned)`] : []),
+    ].join(', ')}. Colors still follow the palette.`
+
   const typeHint = ORB_TYPE_LABELS[doc.orbType].toLowerCase()
 
   return (
@@ -457,6 +585,8 @@ function OrbSection(props: SidebarProps) {
         section: 'orb',
         on: doc.locks.orb,
         onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, orb: on } })),
+        partial,
+        partialTitle,
       }}
       randomize={{
         label: 'Randomize the orb only',
@@ -468,6 +598,14 @@ function OrbSection(props: SidebarProps) {
         label="Type"
         value={doc.orbType}
         options={ORB_TYPES.map((t) => ({ value: t, label: ORB_TYPE_LABELS[t] }))}
+        tools={
+          <PropLock
+            on={sub.type}
+            implied={doc.locks.orb}
+            title="Lock the type: remix keeps it (a segments orb stays segments, cells still re-deal)."
+            onToggle={setSub('type')}
+          />
+        }
         onChange={(t) => props.onSetOrbType(t)}
       />
       <Slider
@@ -475,6 +613,14 @@ function OrbSection(props: SidebarProps) {
         value={doc.orb.radius}
         min={0.05}
         max={1.4}
+        tools={
+          <PropLock
+            on={sub.size}
+            implied={doc.locks.orb}
+            title="Lock the size: remix keeps this radius."
+            onToggle={setSub('size')}
+          />
+        }
         onChange={(radius) => patchOrb({ radius }, 'orb-r')}
       />
       <div className="chiprow">
@@ -504,6 +650,15 @@ function OrbSection(props: SidebarProps) {
             value={doc.orb.cx}
             min={-0.5}
             max={1.5}
+            tools={
+              // One glyph guards the pair — two fields, one user idea.
+              <PropLock
+                on={sub.position}
+                implied={doc.locks.orb}
+                title="Lock the position: remix keeps center X and Y together."
+                onToggle={setSub('position')}
+              />
+            }
             onChange={(cx) => patchOrb({ cx }, 'orb-cx')}
           />
           <Slider
@@ -539,6 +694,18 @@ function OrbSection(props: SidebarProps) {
             max={360}
             step={1}
             suffix="°"
+            tools={
+              <PropLock
+                on={sub.structure}
+                implied={doc.locks.orb || cellsLocked > 0}
+                title={
+                  cellsLocked > 0 && !sub.structure
+                    ? `Structure pinned — ${cellsLocked} segment${cellsLocked === 1 ? ' has' : 's have'} locked properties. Click to pin it in its own right.`
+                    : 'Lock the structure: remix keeps the chord and both cell counts, and keeps dealing what is inside them.'
+                }
+                onToggle={setSub('structure')}
+              />
+            }
             onChange={(angle) =>
               update(
                 (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, angle } } }),
@@ -660,9 +827,37 @@ function PatternPanel(props: SidebarProps) {
         }
       />
       <hr className="divider" />
-      <div className="eyebrow">Layers · {visible.length} of {patternLayers.length}</div>
+      <div className="eyebrow">
+        Layers · {visible.length} of {patternLayers.length}
+        <span className="eyebrow__tools">
+          {/* The patterns *section* lock lives here — its section is the panel. */}
+          <button
+            type="button"
+            className={`lock lock--mini${doc.locks.patterns ? ' lock--on' : ''}`}
+            title={
+              doc.locks.patterns
+                ? 'Locked — the pattern layers are frozen wholesale, including for Remix. Colors still follow the palette.'
+                : 'Freeze all pattern layers against Remix.'
+            }
+            aria-pressed={doc.locks.patterns}
+            onClick={() =>
+              update((d) => ({ ...d, locks: { ...d.locks, patterns: !d.locks.patterns } }))
+            }
+          >
+            {doc.locks.patterns ? 'LOCKED' : 'LOCK'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--tiny"
+            disabled={doc.locks.patterns}
+            onClick={() => props.onRandomizeSection('patterns')}
+          >
+            randomize
+          </button>
+        </span>
+      </div>
       <Check
-        label="Lock layer count for remix"
+        label={`Lock layer count for remix (${patternLayers.length})`}
         checked={doc.subLocks.patterns.count}
         onChange={(count) =>
           update((d) => ({
@@ -671,6 +866,11 @@ function PatternPanel(props: SidebarProps) {
           }))
         }
       />
+      {patternLayers.some(anyLock) && !doc.subLocks.patterns.count && (
+        <div className="note">
+          A locked layer pins the layer count for remix — the locked thing must keep existing.
+        </div>
+      )}
       {patternLayers.map((layer, i) => (
         <div key={layer.id} className="layercard">
           <div className="layercard__head">
@@ -684,6 +884,12 @@ function PatternPanel(props: SidebarProps) {
             </button>
             <span className="layercard__title">Layer {i + 1}</span>
             <span className="section__hint">{layer.name}</span>
+            <ObjectLockChip
+              locks={layer.locks}
+              vocabulary={LAYER_PROPS}
+              what="layer"
+              onChange={(locks) => patch(layer.id, (l) => ({ ...l, locks }))}
+            />
           </div>
           {layer.visible && (
             <PatternLayerEditor
@@ -746,6 +952,9 @@ function PatternLayerEditor({
   onSetPattern: (patternId: string) => void
   onPatch: (recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) => void
 }) {
+  const setLock = (key: LayerPropertyLock) => (on: boolean) =>
+    onPatch((l) => ({ ...l, locks: { ...l.locks, [key]: on } }))
+  const k = layer.locks ?? {}
   return (
     <>
       <Select
@@ -755,6 +964,13 @@ function PatternLayerEditor({
           value: p.id,
           label: p.imported ? `${p.name} (imported)` : p.name,
         }))}
+        tools={
+          <AdvLock
+            on={!!k.pattern}
+            title="Lock the pattern: remix keeps this texture, everything else on the layer stays remixable."
+            onToggle={setLock('pattern')}
+          />
+        }
         onChange={onSetPattern}
       />
       <Slider
@@ -762,6 +978,13 @@ function PatternLayerEditor({
         value={layer.scale}
         min={0.05}
         max={4}
+        tools={
+          <AdvLock
+            on={!!k.scale}
+            title="Lock the scale against remix."
+            onToggle={setLock('scale')}
+          />
+        }
         onChange={(scale) => onPatch((l) => ({ ...l, scale }), `pat-s-${layer.id}`)}
       />
       <Slider
@@ -805,6 +1028,13 @@ function PatternLayerEditor({
           max={180}
           step={1}
           suffix="°"
+          tools={
+            <AdvLock
+              on={!!k.rotation}
+              title="Lock the rotation against remix."
+              onToggle={setLock('rotation')}
+            />
+          }
           onChange={(rotation) => onPatch((l) => ({ ...l, rotation }), `pat-rot-${layer.id}`)}
         />
         <div className="grid2">
@@ -813,6 +1043,13 @@ function PatternLayerEditor({
             value={layer.offsetX}
             min={-1}
             max={1}
+            tools={
+              <AdvLock
+                on={!!k.position}
+                title="Lock the position: remix keeps offset X and Y together."
+                onToggle={setLock('position')}
+              />
+            }
             onChange={(offsetX) => onPatch((l) => ({ ...l, offsetX }), `pat-ox-${layer.id}`)}
           />
           <Slider
@@ -840,7 +1077,16 @@ function PatternLayerEditor({
           }
         />
       </Adv>
-      <div className="eyebrow">Inks</div>
+      <div className="eyebrow">
+        Inks
+        <span className="eyebrow__tools">
+          <AdvLock
+            on={!!k.color}
+            title="Lock the inks: remix keeps this layer's palette-slot assignments. Switching palettes still recolors — freeze that with the Palette lock."
+            onToggle={setLock('color')}
+          />
+        </span>
+      </div>
       {!parsed && <div className="note">Loading pattern…</div>}
       {parsed?.groups.map((group) => (
         <ColorRefEditor
@@ -1772,6 +2018,9 @@ export function Sidebar(props: SidebarProps) {
             section: 'colors',
             on: doc.locks.colors,
             onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, colors: on } })),
+            partial: doc.subLocks.colors.palette ? 1 : 0,
+            partialTitle:
+              'Remix All keeps this palette but may still re-deal slot assignments. The full lock freezes every color assignment too.',
           }}
           randomize={{
             label: 'Switch to a random palette',

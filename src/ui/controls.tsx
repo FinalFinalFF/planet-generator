@@ -32,20 +32,63 @@ export function Adv({ children }: { children: ReactNode }) {
 export function Field({
   label,
   hint,
+  tools,
   children,
 }: {
   label: string
   hint?: ReactNode
+  /** Right-aligned adornments on the label row — property padlocks live here. */
+  tools?: ReactNode
   children: ReactNode
 }) {
   return (
     <div className="field">
       <div className="field__label">
         <span>{label}</span>
-        {hint != null && <span>{hint}</span>}
+        <span className="field__tools">
+          {hint != null && <span>{hint}</span>}
+          {tools}
+        </span>
       </div>
       {children}
     </div>
+  )
+}
+
+/**
+ * The 11px drawn padlock that guards one property. Drawn rather than a glyph
+ * for the same reason as the dice: font glyphs die at this size. Off: outline,
+ * muted. On: filled accent. `implied` renders filled-but-dimmed — covered by a
+ * parent lock (section lock, or existence implication) rather than its own
+ * state, and still clickable to set its own state.
+ */
+export function PropLock({
+  on,
+  implied = false,
+  title,
+  onToggle,
+}: {
+  on: boolean
+  implied?: boolean
+  title: string
+  onToggle: (on: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`proplock${on ? ' proplock--on' : ''}${implied && !on ? ' proplock--implied' : ''}`}
+      title={title}
+      aria-pressed={on}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle(!on)
+      }}
+    >
+      <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <rect x="3" y="7" width="10" height="7" rx="0" fill={on || implied ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" />
+        <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    </button>
   )
 }
 
@@ -80,6 +123,7 @@ export function Slider({
   step = 0.01,
   decimals,
   suffix,
+  tools,
   onChange,
 }: {
   label: string
@@ -89,6 +133,7 @@ export function Slider({
   step?: number
   decimals?: number
   suffix?: string
+  tools?: ReactNode
   onChange: (v: number) => void
 }) {
   const places = decimals ?? (step >= 1 ? 0 : step >= 0.1 ? 1 : 2)
@@ -105,7 +150,10 @@ export function Slider({
     <div className="field">
       <div className="field__label">
         <span>{label}</span>
-        {suffix != null && <span>{suffix}</span>}
+        <span className="field__tools">
+          {suffix != null && <span>{suffix}</span>}
+          {tools}
+        </span>
       </div>
       <div className="field__row">
         <input
@@ -180,11 +228,13 @@ export function Select<T extends string>({
   label,
   value,
   options,
+  tools,
   onChange,
 }: {
   label: string
   value: T
   options: readonly { value: T; label: string }[]
+  tools?: ReactNode
   onChange: (v: T) => void
 }) {
   const id = useId()
@@ -192,6 +242,7 @@ export function Select<T extends string>({
     <div className="field">
       <label className="field__label" htmlFor={id}>
         <span>{label}</span>
+        {tools != null && <span className="field__tools">{tools}</span>}
       </label>
       <select
         id={id}
@@ -213,11 +264,13 @@ export function Segmented<T extends string>({
   label,
   value,
   options,
+  tools,
   onChange,
 }: {
   label?: string
   value: T
   options: readonly { value: T; label: string }[]
+  tools?: ReactNode
   onChange: (v: T) => void
 }) {
   const body = (
@@ -235,7 +288,13 @@ export function Segmented<T extends string>({
       ))}
     </div>
   )
-  return label ? <Field label={label}>{body}</Field> : body
+  return label ? (
+    <Field label={label} tools={tools}>
+      {body}
+    </Field>
+  ) : (
+    body
+  )
 }
 
 export function Check({
