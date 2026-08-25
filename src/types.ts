@@ -166,19 +166,22 @@ export type LayerKind = Layer['kind']
 export const ORB_MODES = ['disc', 'sliced', 'sectors'] as const
 export type OrbMode = (typeof ORB_MODES)[number]
 
-export const SECTOR_FILL_KINDS = ['flat', 'ramp'] as const
+export const SECTOR_FILL_KINDS = ['flat', 'ramp', 'texture'] as const
 export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
 
 /**
  * One sector cell's paint. `flat` is a single ink; `ramp` is a two-stop linear
  * gradient spanning the orb's bounding box rather than the cell, so adjacent
  * ramp cells read as parts of one composition instead of restarting at every
- * seam. The abstract direction's procedural textures (rings, rules, dither)
- * will land here as further kinds.
+ * seam. `texture` fills the cell with any registered pattern (the procedural
+ * textures, the built-in library, or an import), cover-fit and recolored
+ * through the same parse pipeline as pattern layers — `colors` has one entry
+ * per color group of the referenced pattern, exactly like `PatternLayer`.
  */
 export type SectorFill =
   | { kind: 'flat'; color: ColorRef }
   | { kind: 'ramp'; from: ColorRef; to: ColorRef; angle: number }
+  | { kind: 'texture'; patternId: string; colors: ColorRef[]; scale: number; rotation: number }
 
 /**
  * The sector collage from the 2026-08-25 references: the disc cut by one
@@ -339,6 +342,7 @@ export const ORB_STYLES = [
   'patterned-disc',
   'overlap-bloom',
   'sliced-sweep',
+  'sector-collage',
 ] as const
 export type OrbStyle = (typeof ORB_STYLES)[number]
 
@@ -348,4 +352,5 @@ export const ORB_STYLE_LABELS: Record<OrbStyle, string> = {
   'patterned-disc': 'Patterned disc',
   'overlap-bloom': 'Overlap bloom',
   'sliced-sweep': 'Sliced sweep',
+  'sector-collage': 'Sector collage',
 }

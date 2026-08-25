@@ -33,9 +33,21 @@ function toName(path: string): string {
   return file.replace(/^SVG\s*-\s*/i, '').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Registered after this module evaluates (see `registerProceduralSources`),
+ * because the procedural module imports the `PatternSource` type from here and
+ * a value-level import in the other direction would be a cycle.
+ */
 export const PATTERN_SOURCES: PatternSource[] = Object.entries(modules)
   .map(([path, load]) => ({ id: toId(path), name: toName(path), load }))
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+
+/** Append generated sources (the procedural textures). Idempotent by id. */
+export function registerSources(sources: PatternSource[]): void {
+  for (const s of sources) {
+    if (!PATTERN_SOURCES.some((p) => p.id === s.id)) PATTERN_SOURCES.push(s)
+  }
+}
 
 export const PATTERN_IDS: string[] = PATTERN_SOURCES.map((p) => p.id)
 

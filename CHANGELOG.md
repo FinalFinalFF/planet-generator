@@ -12,6 +12,48 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: procedural textures + sector texture cells + `sector-collage` (v2, Phases 2–3)
+
+The abstract direction's print vocabulary, built as four generators in
+`src/lib/patterns/textures/` — concentric rings, radial rules, vertical-bar
+dither, stepped density stripes — each authored against a reference image and
+verified by screenshot (the tileable two seam-checked as 2×2). Decisions:
+
+- **Textures are pattern sources, not a new subsystem.** Each generator emits a
+  plain SVG string satisfying the parse contract (full-bleed plate, hex-literal
+  inks, drawable elements only), and `procedural.ts` registers the curated
+  variants as `PatternSource`s. Everything else — palette-slot mapping, pattern
+  layers, imports-style listing, remix reach — came for free. The four
+  generators were built by four parallel agents against that written contract;
+  all four came back drop-in compatible.
+- **Sector texture cells inline recolored markup; they never paint via
+  `<pattern>`.** `expandPatternFills` only rewrites `rect` fills, so a
+  pattern-filled cell `<path>` would silently lose its texture in a Figma
+  import. Inlining is export-safe by construction. Verified by extracting a
+  remixed collage's `<svg>` from the QA page and rendering it standalone —
+  identical.
+- **Cell clipping is one exact path, not nested clips** (see the Phase 1 entry
+  for the Chrome scaling bug): `circleRectIntersectionPath` computes cell∩circle
+  analytically. The trick that keeps it tractable: the sector structure rotates
+  about the circle's own center, so the circle is invariant — intersect an
+  axis-aligned rect with the circle in the unrotated frame, then rotate the
+  emitted points/arcs.
+- **Remix**: mode roll is now disc/sliced/sectors weighted `[0.36, 0.14, 0.5]` —
+  the brief asked for abstract at least as often as legacy. Sector config draws
+  happen unconditionally (like the slices) with the colors lock applied as pure
+  selection (previous fills' ColorRefs re-mapped over the drawn structure).
+  Three tunings from the remix contact sheet: flat cells never deal the ground
+  slot (a bg-colored cell reads as a bite out of the disc); plate-off texture
+  cells draw ink from the light deck only (dark ink on the dark canvas made
+  whole cells vanish); accents go invisible when the selected orb is sectors
+  (orbit rings around a collage read as astronomy).
+- **One `sector-collage` style, not three.** Style dropdown entries are
+  composition archetypes; the collage's variety comes from remix. The style
+  keeps the doc's sector config (as sliced-sweep keeps slice settings) and does
+  not set `doc.flat` — flat is a standing user constraint no style writes.
+  `detectOrbStyle` maps `mode === 'sectors'` to it unconditionally, mirroring
+  sliced-sweep.
+
 ### Added: `sectors` orb mode — the abstract direction's structure (v2, Phase 1)
 
 Client feedback on the RSAC refresh: the orbs read as literal planet renderings.

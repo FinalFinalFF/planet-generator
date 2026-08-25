@@ -112,7 +112,7 @@ terminator shadow from multiplying against the orb beneath it.
 
 ### Orb render modes
 
-`orb.mode` is `disc` (gradient-filled circle) or `sliced`. `SlicedOrb`
+`orb.mode` is `disc` (gradient-filled circle), `sliced`, or `sectors`. `SlicedOrb`
 builds the reference's banded lattice from **concentric circles about a focus
 outside the orb**, drawn largest first so each smaller circle paints over the
 last and leaves an annulus visible. Two things there are load-bearing and easy to
@@ -128,6 +128,47 @@ undo by accident:
 `slices.blend` defaults to `multiply`; `screen` washes the disc toward white and
 loses the base hues. Slices are always clipped to the circle — concentric bands
 have no scalloped silhouette to gain by running free, they just flood the canvas.
+
+### Sector mode (the v2 abstract direction)
+
+`sectors` is the collage from the 2026-08-25 client comps: one chord splits the
+disc into two rows, each row splits crosswise into 1–3 equal cells, each cell
+filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
+
+- **Cell geometry is derived** — even splits; only the chord's angle and offset
+  are authored. Same philosophy as the slices' derived radii.
+- **Never nest clip paths.** Chrome mis-rasterizes nested clip intersections
+  when the host `<svg>` is CSS-scaled — which is how the editor stage, batch
+  cells, and thumbnails all render (correct standalone, broken scaled; see
+  CHANGELOG). Flat/ramp cells are pre-rotated rect *paths* under the single orb
+  clip (`rotatedRectPath`); texture cells clip their inlined markup with one
+  clipPath holding the exact cell∩circle path (`circleRectIntersectionPath` —
+  the rotation is about the circle's center, so the circle is invariant and the
+  intersection computes in the unrotated frame).
+- **Texture cells never paint via `<pattern>`** — `expandPatternFills` only
+  rewrites `rect` fills, so a pattern-filled `<path>` would silently lose its
+  texture in Figma. They inline the recolored markup cover-fit instead, which
+  is export-safe by construction.
+- **Ramps span the orb's box, not the cell**, so adjacent ramp cells read as one
+  composition; ramp angle is absolute and ignores the structure's rotation.
+- The `sector-collage` style maps to/from `detectOrbStyle` and turns shading,
+  accents, and pattern layers off — it does **not** touch `doc.flat` (styles
+  never write the standing constraint). Remix retires accents whenever the
+  selected orb is sectors: orbit rings around a collage read as astronomy,
+  which is the literalness v2 exists to avoid.
+
+### Procedural textures
+
+`src/lib/patterns/textures/` (rings, rules, dither, steps) generate SVG
+*strings* that register as ordinary `PatternSource`s (`procedural.ts`,
+registered by `registry.ts` at import). That is the whole design: because they
+go through the same parse → recolor pipeline as `Patterns/` files, they get
+palette mapping, pattern layers, sector texture cells, and remix reach with no
+special cases. Their contract: 400×400 viewBox, full-bleed `#0A0A0A` plate
+first (detected and hidden as the Plate group), one light ink hex, only plain
+drawable elements, deterministic (`makeRng(seed)` for the stochastic ones),
+dither/steps tile seamlessly. Ids start `tx-` — remix's sector dealing prefers
+that pool (`dealFill` in `remix.ts`).
 
 ### Pattern layer masks
 

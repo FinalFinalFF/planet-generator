@@ -25,9 +25,11 @@ import {
   arcPath,
   crescentPath,
   dirFromAngle,
+  circleRectIntersectionPath,
   linearEndpoints,
   n,
   polar,
+  rotateAbout,
   rotatedRectPath,
   wedgePath,
   type Box,
@@ -296,12 +298,63 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
 
   const defs: React.ReactNode[] = []
   const cells: React.ReactNode[] = []
+  const textured: React.ReactNode[] = []
   rows.forEach((row, ri) => {
     const y0 = ri === 0 ? cy - pad : chordY
     const y1 = ri === 0 ? chordY : cy + pad
     row.forEach((fill, ci) => {
       const x0 = ci === 0 ? cx - pad : cx - r + (2 * r * ci) / row.length
       const x1 = ci === row.length - 1 ? cx + pad : cx - r + (2 * r * (ci + 1)) / row.length
+
+      if (fill.kind === 'texture') {
+        const parsed = ctx.parsedById.get(fill.patternId)
+        if (!parsed) return // not parsed yet; the cell paints once it loads
+        // Clamp outer overhangs to just past the circle so the intersection
+        // walk works with tame numbers; never clamp *inside* the circle, or
+        // the clamp itself would change the intersection.
+        const m = r * 1.05
+        const gx0 = Math.max(x0, cx - m)
+        const gx1 = Math.min(x1, cx + m)
+        const gy0 = Math.max(y0, cy - m)
+        const gy1 = Math.min(y1, cy + m)
+        const cellD = circleRectIntersectionPath(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+        if (!cellD) return // chord pushed the cell entirely off the disc
+
+        const paints: GroupPaint[] = parsed.groups.map((g) => {
+          const ref = fill.colors[g.index]
+          return { hex: resolveColor(ref ?? { slot: g.index }, palette), alpha: refAlpha(ref) }
+        })
+        const markup = recolor(
+          parsed,
+          resolveTokens(parsed, paints),
+          `${prefix}-sec-${ri}-${ci}`,
+        )
+        // Cover-fit over the cell's visible box: sized to its diagonal so any
+        // texture rotation still covers, centered on the box's rotated center.
+        const bw = Math.max(1, gx1 - gx0)
+        const bh = Math.max(1, gy1 - gy0)
+        const bc = rotateAbout((gx0 + gx1) / 2, (gy0 + gy1) / 2, s.angle, cx, cy)
+        const k = (Math.hypot(bw, bh) * Math.max(0.05, fill.scale)) /
+          Math.min(parsed.width, parsed.height)
+        const transform =
+          `translate(${n(bc.x)} ${n(bc.y)}) rotate(${n(fill.rotation)}) ` +
+          `scale(${n(k, 5)}) translate(${n(-parsed.width / 2)} ${n(-parsed.height / 2)})`
+        const clipId = `${prefix}-secclip-${ri}-${ci}`
+        defs.push(
+          <clipPath key={clipId} id={clipId}>
+            <path d={cellD} />
+          </clipPath>,
+        )
+        textured.push(
+          // One clip level, holding the exact cell∩circle path — see the
+          // nested-clip note in the component comment.
+          <g key={`tx-${ri}-${ci}`} clipPath={`url(#${clipId})`}>
+            <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
+          </g>,
+        )
+        return
+      }
+
       const gradId = `${prefix}-secg-${ri}-${ci}`
       if (fill.kind === 'ramp') {
         defs.push(
@@ -328,6 +381,7 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
     <Fragment>
       {defs.length > 0 && <defs>{defs}</defs>}
       <g clipPath={`url(#${prefix}-orb-clip)`}>{cells}</g>
+      {textured}
     </Fragment>
   )
 }

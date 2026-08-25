@@ -499,6 +499,19 @@ function planFor(style: OrbStyle): StylePlan {
         shading: { visible: false },
         accentsVisible: true,
       }
+
+    case 'sector-collage':
+      // The abstract direction: the collage carries the whole orb, so every
+      // 3D cue goes — no shading, no accents, no pattern layers on top. The
+      // existing sector config is kept (like sliced-sweep keeps slice
+      // settings); remix is what deals new cells. Deliberately does not touch
+      // `doc.flat` — that is a standing user constraint, never a style's.
+      return {
+        orb: (p) => ({ ...p, mode: 'sectors' }),
+        pattern: (p) => ({ ...p, visible: false }),
+        shading: { visible: false },
+        accentsVisible: false,
+      }
   }
 }
 
@@ -561,9 +574,7 @@ export function applyOrbStyle(doc: OrbDoc, style: OrbStyle): OrbStyleResult {
 
 /** Best-effort read of which style the current document resembles. */
 export function detectOrbStyle(doc: OrbDoc): OrbStyle | 'custom' {
-  // No style produces sectors yet — the abstract styles arrive with the v2
-  // remix work, and until then the honest answer is `custom`.
-  if (doc.orb.mode === 'sectors') return 'custom'
+  if (doc.orb.mode === 'sectors') return 'sector-collage'
   if (doc.orb.mode === 'sliced') return 'sliced-sweep'
   const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
   const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')

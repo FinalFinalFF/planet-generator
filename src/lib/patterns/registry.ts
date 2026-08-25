@@ -2,7 +2,12 @@
 
 import { clamp, labToHex, hexToLab, withAlpha } from '../color'
 import { parsePatternSvg, type ParsedPattern } from './parse'
-import { getSource, PATTERN_SOURCES } from './source'
+import { getSource, PATTERN_SOURCES, registerSources } from './source'
+import { PROCEDURAL_SOURCES } from './procedural'
+
+// The procedural textures join the library the moment the registry loads, so
+// every consumer — pickers, remix, sector cells — sees one uniform source list.
+registerSources(PROCEDURAL_SOURCES)
 
 const cache = new Map<string, ParsedPattern>()
 const inflight = new Map<string, Promise<ParsedPattern>>()

@@ -355,7 +355,13 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   }
 
   // --- orb candidate ---
-  const sliced = rng.bool(0.22)
+  // The abstract direction leads: sector collages draw as often as both
+  // legacy modes combined — the v2 brief's "at least as often as legacy".
+  const orbMode = rng.weighted(
+    ['disc', 'sliced', 'sectors'] as OrbMode[],
+    [0.36, 0.14, 0.5],
+  )
+  const sliced = orbMode === 'sliced'
   const slices: SliceConfig = {
     ...DEFAULT_SLICES,
     count: rng.int(9, 26),
@@ -373,6 +379,81 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       [0.42, 0.28, 0.18, 0.12],
     ),
   }
+  // Sector candidate — drawn always, like the slices, so the stream never
+  // depends on which mode was rolled. Cell counts and per-cell kinds are
+  // earlier draws, which the draw count may legitimately depend on.
+  const sectorAngleKind = rng.weighted(['h', 'v', 'free'] as const, [0.44, 0.28, 0.28])
+  const sectorFreeAngle = rng.int(0, 359)
+  const sectorAngle =
+    sectorAngleKind === 'h' ? 0 : sectorAngleKind === 'v' ? 90 : sectorFreeAngle
+  const sectorOffsetDraw = rng.float(-0.45, 0.45)
+  const sectorOffset = rng.bool(0.55) ? 0 : sectorOffsetDraw
+  // The print vocabulary first; any parsed pattern works as a cell texture.
+  const texturePool = deps.available.filter((p) => p.id.startsWith('tx-'))
+  const cellPool = texturePool.length > 0 ? texturePool : deps.available
+  const dealFill = (): SectorFill => {
+    const kind = rng.weighted(['flat', 'ramp', 'texture'] as const, [0.4, 0.2, 0.4])
+    // Never deal the ground slot as a flat cell: the background is almost
+    // always deck.dark[0], and a cell in the same ink reads as a bite taken
+    // out of the disc rather than a sector.
+    const flatPool = deck.all.filter((s) => s !== deck.dark[0])
+    const slotA = rng.pick(flatPool.length > 0 ? flatPool : deck.all)
+    const slotB = rng.pick(deck.light)
+    const rampAngle = rng.int(0, 359)
+    if (kind === 'texture' && cellPool.length > 0) {
+      const parsed = rng.pick(cellPool)
+      // Collage cells carry their own ground about half the time — the comps'
+      // cells are mostly opaque patches, not ink floating on the background.
+      // Without a plate the ink must come from the light end, or a dark ink on
+      // the dark canvas makes the whole cell silently vanish.
+      const plateOn = rng.bool(0.5)
+      const plateSlot = rng.pick(deck.dark)
+      const inkPool = plateOn ? [...deck.light, ...deck.mid] : deck.light
+      const colors = parsed.groups.map((g) =>
+        g.isBackground
+          ? { slot: plateSlot, alpha: plateOn ? 1 : 0 }
+          : { slot: rng.pick(inkPool), alpha: 1 },
+      )
+      return {
+        kind: 'texture',
+        patternId: parsed.id,
+        colors,
+        scale: rng.float(0.7, 1.6),
+        rotation: rng.bool(0.8) ? 0 : 90,
+      }
+    }
+    if (kind === 'ramp') {
+      return { kind: 'ramp', from: { slot: slotA }, to: { slot: slotB }, angle: rampAngle }
+    }
+    return { kind: 'flat', color: { slot: slotA } }
+  }
+  const rowACount = rng.weighted([1, 2, 3], [0.5, 0.36, 0.14])
+  const rowBCount = rng.weighted([1, 2, 3], [0.34, 0.46, 0.2])
+  let sectorRowA = Array.from({ length: rowACount }, dealFill)
+  let sectorRowB = Array.from({ length: rowBCount }, dealFill)
+  if (locks.colors) {
+    // The colors lock freezes rendered colors: reuse the incoming fills'
+    // ColorRefs over the freshly drawn structure, cycling if it grew. The
+    // draws above still happened — this is pure selection, per the module
+    // header.
+    const prevRefs: ColorRef[] = [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB].flatMap(
+      (f) =>
+        f.kind === 'flat' ? [f.color] : f.kind === 'ramp' ? [f.from, f.to] : f.colors,
+    )
+    if (prevRefs.length > 0) {
+      let i = 0
+      const next = () => prevRefs[i++ % prevRefs.length]
+      const relock = (f: SectorFill): SectorFill =>
+        f.kind === 'flat'
+          ? { ...f, color: next() }
+          : f.kind === 'ramp'
+            ? { ...f, from: next(), to: next() }
+            : { ...f, colors: f.colors.map(() => next()) }
+      sectorRowA = sectorRowA.map(relock)
+      sectorRowB = sectorRowB.map(relock)
+    }
+  }
+
   const orbCx = rng.float(0.45, 0.55)
   const orbCy = rng.float(0.45, 0.55)
   const orbRadius = rng.float(0.5, 0.74)
@@ -385,8 +466,14 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const orbCandidate: Orb = {
     ...doc.orb,
     visible: true,
-    mode: (sliced ? 'sliced' : 'disc') as OrbMode,
+    mode: orbMode,
     slices,
+    sectors: {
+      angle: sectorAngle,
+      offset: sectorOffset,
+      rowA: sectorRowA,
+      rowB: sectorRowB,
+    },
     cx: orbCx,
     cy: orbCy,
     radius: orbRadius,
@@ -412,26 +499,31 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
         ? prevPatterns.length
         : rolledCount
 
-  // A slice lattice already carries the whole orb; heavy texture and a
-  // terminator on top of it just read as mud. Taken from the *selected* orb,
-  // so a locked disc orb keeps its textures — hence the roll below is
-  // unconditional while its use is not.
-  const slicedNow = (locks.orb ? doc.orb : orbCandidate).mode === 'sliced'
+  // A slice lattice already carries the whole orb — and so does a sector
+  // collage: heavy texture and a terminator on top of either just read as mud.
+  // Taken from the *selected* orb, so a locked disc orb keeps its textures —
+  // hence the roll below is unconditional while its use is not.
+  const selfCarrying = (mode: OrbMode) => mode === 'sliced' || mode === 'sectors'
+  const busyNow = selfCarrying((locks.orb ? doc.orb : orbCandidate).mode)
 
   const patternCandidates: PatternLayer[] = Array.from({ length: patternCount }, (_, i) => {
     const layer = remixPatternLayer(rng, deps, prevPatterns[i], locks.colors)
     const hideForSlices = rng.bool(0.35)
-    return slicedNow ? { ...layer, visible: i === 0 && hideForSlices } : layer
+    return busyNow ? { ...layer, visible: i === 0 && hideForSlices } : layer
   })
 
   // The layer-existence guards stay: a document with no shading layer really
   // does consume fewer draws, because that is doc state. Only the lock guards go.
   const shadingCandidate: ShadingLayer | null = prevShading
-    ? { ...remixShading(rng, palette, prevShading, locks.colors), visible: !slicedNow }
+    ? { ...remixShading(rng, palette, prevShading, locks.colors), visible: !busyNow }
     : null
 
+  // Orbit rings and satellites around a sector collage read as astronomy —
+  // exactly the literalness the collage exists to avoid — so remix retires
+  // them there. Sliced keeps its accents; that mode never drew the complaint.
+  const sectorsNow = (locks.orb ? doc.orb : orbCandidate).mode === 'sectors'
   const accentsCandidate: AccentLayer | null = prevAccents
-    ? remixAccents(rng, palette, prevAccents, locks.colors)
+    ? { ...remixAccents(rng, palette, prevAccents, locks.colors), visible: !sectorsNow }
     : null
 
   // --- apply the locks ---
@@ -618,14 +710,22 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
   const sectorPool = rng.shuffle(deck.all)
   let k = 0
   const nextSlot = () => sectorPool[k++ % sectorPool.length]
-  const shuffleFill = (f: SectorFill): SectorFill =>
-    f.kind === 'flat'
-      ? { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
-      : {
-          ...f,
-          from: { ...f.from, slot: nextSlot(), hex: null },
-          to: { ...f.to, slot: nextSlot(), hex: null },
-        }
+  const shuffleFill = (f: SectorFill): SectorFill => {
+    if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
+    if (f.kind === 'ramp')
+      return {
+        ...f,
+        from: { ...f.from, slot: nextSlot(), hex: null },
+        to: { ...f.to, slot: nextSlot(), hex: null },
+      }
+    return {
+      ...f,
+      colors: f.colors.map((c) =>
+        // A hidden plate stays hidden, same as pattern layers.
+        (c.alpha ?? 1) <= 0.001 ? c : { ...c, slot: nextSlot(), hex: null },
+      ),
+    }
+  }
   const sectors = {
     ...orb.sectors,
     rowA: orb.sectors.rowA.map(shuffleFill),
