@@ -3,7 +3,7 @@
 Client-side brand-graphics generator for "orb" discs: layered gradients and
 geometric patterns clipped to a circle. Vite + React + TypeScript, no backend.
 
-**Live: https://finalfinalff.github.io/planet-generator/**
+**Live: https://orbs.fnfn.us/**
 
 There is no server and no shared state. Documents, palettes and presets live in
 `localStorage`, which is per-origin and per-browser — everyone who opens the page

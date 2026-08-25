@@ -12,6 +12,28 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: the site now lives at https://orbs.fnfn.us/
+
+Custom domain on the existing GitHub Pages deploy, three coupled pieces:
+
+- **Cloudflare CNAME** `orbs` → `finalfinalff.github.io`, deliberately
+  **DNS-only (grey cloud)** so GitHub provisions and renews the TLS cert.
+  Proxying it orange-cloud during initial setup can stall GitHub's cert
+  issuance; if someone later wants Cloudflare features on the hostname, flip it
+  after the cert exists and know that cert renewals depend on GitHub still
+  being reachable for validation.
+- **Pages custom domain** set in repo settings (via API) *and* mirrored in
+  `public/CNAME`, which Vite copies into `dist/`. With workflow-based deploys
+  the settings value alone suffices, but the file keeps the domain
+  self-describing in the repo and survives Pages being re-enabled from scratch
+  (the `enablement: true` path in deploy.yml).
+- **`base` changed `/planet-generator/` → `/`** because a custom domain serves
+  from the domain root, not the repo slug. The old warning ("only change base
+  with a repo rename") is superseded: base now pairs with the *domain*, and
+  reverting the domain means reverting base in the same change. The old
+  `finalfinalff.github.io/planet-generator/` URL 301s to the domain, so
+  existing links keep working.
+
 ### Changed: the seven hand-authored palettes are commented out
 
 `ember-terminator`, `pale-sky-brights`, `circuit-jade`, `bauhaus-signal`,

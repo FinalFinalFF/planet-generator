@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev         # Vite dev server on :5173 (redirects to the /planet-generator/ base)
+npm run dev         # Vite dev server on :5173
 npm run build       # tsc -b && vite build
 npm run typecheck   # tsc -b --noEmit
 npm test            # vitest run — three contracts that visual QA cannot see
@@ -20,14 +20,17 @@ determinism plus lock absoluteness, pattern parse output, and the hand-rolled ZI
 writer's byte layout. Keep it that way — everything else in this app is verified by
 looking at it (see below). Do not grow this into a general test suite.
 
-The `base` means the dev server serves from `/planet-generator/`; it redirects `/`,
-so the screenshot recipe below still works, but a QA route lives at
-`http://localhost:5173/planet-generator/qa.html`.
+The site lives at the custom domain **https://orbs.fnfn.us/** — a Cloudflare
+CNAME (DNS-only, so GitHub manages the TLS cert) onto `finalfinalff.github.io`,
+plus `public/CNAME` and the Pages custom-domain setting. `base` is therefore `/`;
+the dev server serves from the root and a QA route lives at
+`http://localhost:5173/qa.html`.
 
-That path is the **GitHub repo slug**, not the product name — the app is the Orb
-generator, but the repo is still `FinalFinalFF/planet-generator` and Pages serves
-from the repo name. Do not "finish the rename" by editing `base` on its own; it
-only changes together with an actual repo rename, and getting it wrong 404s every
+The repo is still `FinalFinalFF/planet-generator` (the app is the Orb generator;
+the slug predates the rename), and the old
+`finalfinalff.github.io/planet-generator/` URL redirects to the domain. `base`
+and the custom domain are a pair: if the domain is ever removed, `base` must go
+back to `/planet-generator/` in the same change — getting this wrong 404s every
 asset on the live site.
 
 ### Keep CHANGELOG.md current
