@@ -30,6 +30,12 @@ from the repo name. Do not "finish the rename" by editing `base` on its own; it
 only changes together with an actual repo rename, and getting it wrong 404s every
 asset on the live site.
 
+**Pushing to `main` deploys** — a GitHub Actions workflow runs `npm run build`
+and publishes to GitHub Pages, so a type error blocks the deploy rather than
+shipping a broken page. `Examples/`, `Palettes/` and `Frame 468.png` are
+deliberately untracked (third-party posters and brand boards in a public repo —
+see `.gitignore`); never force-add them.
+
 ### Keep CHANGELOG.md current
 
 `CHANGELOG.md` is a **decision log**, not a commit summary. After substantive
@@ -224,8 +230,11 @@ any gradient authored against a longer palette. Palettes shorter than the ~8 slo
 the default document assumes are normal (pasting four hex codes makes one), so
 this path is hit in practice.
 
-Built-ins live in `BUILTIN_PALETTES`; the seven sampled from `Palettes/` carry a
-comment naming the source image.
+Built-ins live in `BUILTIN_PALETTES` — currently 18, all sampled from reference
+material: seven from the image boards in `Palettes/` and eleven from the
+`Palettes/Gradients/` SVGs, each with a comment naming its source file. The
+original hand-authored set is retired but kept in a comment block above them;
+leave it there rather than deleting or reviving it.
 
 ### Layer stack
 
@@ -360,6 +369,20 @@ than adds, so it has three moving parts that must stay together:
 The legacy names are load-bearing compatibility, not leftovers. Do not "finish
 the rename" by deleting them.
 
+### Undo history
+
+`src/state/useDoc.ts` owns document state: a past/present/future history with
+coalescing and a debounced localStorage save. Two contracts for callers:
+
+- Continuous controls (sliders, drags) pass a stable `coalesce` key so a drag
+  collapses into **one** undo entry inside the 700 ms window; distinct edits need
+  distinct keys or they merge.
+- `transient: true` replaces the present without touching history at all — for
+  live previews mid-gesture, with a real commit at the end.
+
+The hook is StrictMode-safe by construction (this regressed once — see
+CHANGELOG); keep effects idempotent if you touch it.
+
 ## Reference material
 
 `Examples/` holds the target aesthetic. `image 41.png` is the sliced-sphere
@@ -369,7 +392,9 @@ large scale — not low-opacity soft-light washes. Defaults and remix weighting 
 tuned that way; keep them there.
 
 `CLAUDE-CODE-PROMPTS.md` is the original brief. **All three prompts are
-implemented.** Keyboard shortcuts are `R`, `⇧R`, `S`, `E`, `B`, `Esc`, and
+implemented.** `CLAUDE-CODE-FIX-PROMPTS.md` is the code-review follow-up log —
+all nine of its prompts are implemented too; treat both as history, not a
+to-do list. Keyboard shortcuts are `R`, `⇧R`, `S`, `E`, `B`, `Esc`, and
 `⌘Z` / `⇧⌘Z`.
 
 ## Editor chrome
