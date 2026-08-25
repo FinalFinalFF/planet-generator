@@ -253,7 +253,7 @@ function SlicedOrb({ ctx }: { ctx: Ctx }) {
   // Always clipped: bands are concentric, so letting them run free just floods
   // the canvas rather than scalloping a silhouette.
   return (
-    <g clipPath={`url(#${prefix}-orb-clip)`}>
+    <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sliced orb">
       <g>{family(0, clamp(s.alpha, 0, 1))}</g>
       {families === 2 && (
         <g style={blendStyle(s.blend)}>{family(1, clamp(s.modulation, 0, 1))}</g>
@@ -358,7 +358,11 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
         textured.push(
           // One clip level, holding the exact cell∩circle path — see the
           // nested-clip note in the component comment.
-          <g key={`tx-${ri}-${ci}`} clipPath={`url(#${clipId})`}>
+          <g
+            key={`tx-${ri}-${ci}`}
+            clipPath={`url(#${clipId})`}
+            data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1} ${parsed.name}`}
+          >
             <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
           </g>,
         )
@@ -383,6 +387,7 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
       cells.push(
         <path
           key={`${ri}-${ci}`}
+          data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1}`}
           d={rotatedRectPath(x0, y0, x1, y1, s.angle, cx, cy)}
           fill={
             fill.kind === 'flat'
@@ -399,7 +404,7 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
   return (
     <Fragment>
       {defs.length > 0 && <defs>{defs}</defs>}
-      <g clipPath={`url(#${prefix}-orb-clip)`}>{cells}</g>
+      <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sector cells">{cells}</g>
       {textured}
     </Fragment>
   )
@@ -498,6 +503,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
           clipPath={`url(#${prefix}-orb-clip)`}
           opacity={n(layer.opacity, 4)}
           style={blendStyle(layer.blend)}
+          data-name={`Pattern ${layer.name}`}
         >
           <g mask={useMask ? `url(#${maskId})` : undefined}>
             <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
@@ -528,6 +534,7 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
         clipPath={`url(#${prefix}-orb-clip)`}
         opacity={n(layer.opacity, 4)}
         style={blendStyle(layer.blend)}
+        data-name={`Pattern ${layer.name}`}
       >
         <rect
           x={n(cx - r)}
@@ -599,7 +606,7 @@ function ShadingLayerView({ layer, ctx }: { layer: ShadingLayer; ctx: Ctx }) {
       </defs>
       {/* No group opacity: that would isolate the group and stop these from
           blending against the orb underneath. */}
-      <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(layer.blend)}>
+      <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(layer.blend)} data-name="Shading">
         {sAmt > 0.001 && (
           <circle
             cx={n(cx)}
@@ -673,6 +680,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
         return (
           <path
             key={ring.id}
+            data-name="Ring"
             d={arcPath(cx, cy, rr, Math.max(1, rr * clamp(ring.tilt, 0.02, 1)), ring.start, ring.sweep, ring.rotation)}
             fill="none"
             stroke={resolveColor(ring.color, palette)}
@@ -691,6 +699,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
         return (
           <circle
             key={sat.id}
+            data-name="Satellite"
             cx={n(p.x)}
             cy={n(p.y)}
             r={n(sr)}
@@ -704,7 +713,7 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
       })}
 
       {showRim && (
-        <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(rim.blend)}>
+        <g clipPath={`url(#${prefix}-orb-clip)`} style={blendStyle(rim.blend)} data-name="Rim light">
           <path
             d={crescentPath(cx, cy, r, rim.angle, -Math.max(0.001, rim.width) * r)}
             fillRule="evenodd"
@@ -809,6 +818,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
             width={n(canvas.w)}
             height={n(canvas.h)}
             fill={`url(#${vignetteId})`}
+            data-name="Vignette"
           />
         </Fragment>
       )}
@@ -859,7 +869,7 @@ export function OrbSvg({
 
       {/* Tagged so the transparent-background export can drop it wholesale. */}
       {showBackground && (
-        <g data-role="background">
+        <g data-role="background" data-name="Background">
           <BackgroundView ctx={ctx} />
         </g>
       )}
@@ -870,7 +880,7 @@ export function OrbSvg({
       {doc.orb.visible && doc.orb.mode === 'disc' && doc.solidFills && (
         // Solid fills: the disc gradient collapses to its mid-ramp ink. The
         // gradient itself is untouched, so toggling this off restores it.
-        <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={solidFor(doc.orb.gradient, palette)} />
+        <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={solidFor(doc.orb.gradient, palette)} data-name="Orb disc" />
       )}
       {doc.orb.visible && doc.orb.mode === 'disc' && !doc.solidFills && (
         <Fragment>
@@ -891,7 +901,7 @@ export function OrbSvg({
                   palette={palette}
                 />
               </defs>
-              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${orbGradId})`} />
+              <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={`url(#${orbGradId})`} data-name="Orb disc" />
             </Fragment>
           )}
         </Fragment>
@@ -915,6 +925,7 @@ export function OrbSvg({
 
       {doc.orb.visible && doc.orb.stroke.enabled && (
         <circle
+          data-name="Outline"
           cx={n(cx)}
           cy={n(cy)}
           r={n(r)}

@@ -103,7 +103,12 @@ This forbids a whole class of otherwise-reasonable changes:
   viewBox). PNG export passes `expandPatterns: false` — the rasterizer tiles
   correctly and expanding only bloats the intermediate string.
 - **`data-role="background"`** marks the background group so the transparent
-  export can drop it wholesale; `serializeSvg` then strips all `data-*`.
+  export can drop it wholesale. **`data-name`** marks logical layers
+  (`Background`, `Orb disc`, `Sector B1 <texture>`, `Pattern <name>`, `Ring`…):
+  `serializeSvg` turns each into an `id` on the clone (NCName-sanitized,
+  deduplicated), because design tools — Figma included — read `id` as the layer
+  name on import, and an unnamed export lands as "Group/Vector" soup.
+  `serializeSvg` then strips all `data-*`.
 
 Shading is the subtle case: its children each carry their own
 `mix-blend-mode` and their own opacity, and the wrapping `<g>` deliberately has

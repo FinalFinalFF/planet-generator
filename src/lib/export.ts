@@ -204,8 +204,26 @@ export function serializeSvg(source: SVGSVGElement, opts: ExportOptions): string
     }
   }
 
+  // Design tools read the `id` attribute as the layer name on import (Figma
+  // does), so semantic `data-name` markers become ids here — on the clone,
+  // where uniqueness only has to hold within this one file. Without this the
+  // import lands as anonymous "Group / Vector" soup, which costs as much
+  // editability as a dropped fill would.
+  const seenNames = new Map<string, number>()
+  clone.querySelectorAll('[data-name]').forEach((el) => {
+    // XML ids are NCNames — no spaces — so the human name is underscored the
+    // same way Figma's own SVG exporter writes layer names.
+    const base = (el.getAttribute('data-name') ?? '').replace(/\s+/g, '_').replace(/[^\w.-]/g, '')
+    if (!base) return
+    const n = (seenNames.get(base) ?? 0) + 1
+    seenNames.set(base, n)
+    // Never overwrite a def id — nothing renderable carries an id of its own.
+    if (!el.hasAttribute('id')) el.setAttribute('id', n === 1 ? base : `${base}_${n}`)
+  })
+
   // Editor-only bookkeeping has no business in the exported file.
   clone.querySelectorAll('[data-role]').forEach((el) => el.removeAttribute('data-role'))
+  clone.querySelectorAll('[data-name]').forEach((el) => el.removeAttribute('data-name'))
   clone.removeAttribute('class')
   clone.removeAttribute('style')
 

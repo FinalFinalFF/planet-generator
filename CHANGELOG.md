@@ -12,6 +12,29 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: semantic layer names in exports (Figma editability, part 1)
+
+New requirement: exports must open in Figma fully editable. First finding from
+auditing real batch exports: the constructs we emit (paths, rects, circles,
+ellipses, polylines, groups, clipPaths, linear/radial gradients, standard blend
+modes) all map to editable Figma layers — but the tree would land as anonymous
+"Group / Vector" soup, which costs as much editability as a dropped fill.
+Figma reads the SVG `id` attribute as the layer name on import, so `OrbSvg` now
+marks logical layers with `data-name` and `serializeSvg` converts those to ids
+on the export clone (NCName-sanitized — ids cannot contain spaces — and
+deduplicated). Verified end-to-end through the batch/zip harness: exports carry
+`Background`, `Orb_disc`, `Sector_B1_Dither__Sparse_Scan`, `Pattern_Dot_Bloom`,
+`Ring`, `Satellite`; no `data-*` leaks.
+
+Also verified this round: the store-only ZIP writer passes `unzip -t` with v2
+documents, including a 2.9 MB expanded sector-texture file.
+
+Still open (needs a live Figma session, which needs the user): empirical import
+of the two staged test files, checking (1) whether the lens `<mask>` — luminance
+with a gradient feather — survives, and (2) `mix-blend-mode` fidelity. If masks
+fail, the candidate fix is a Figma-safe export path converting lens masks to
+exact circle∩circle clip geometry (feather dropped, editability kept).
+
 ### Added: `solidFills` — the gradients-off standing constraint
 
 Client follow-up to flat-first: gradients themselves can read as spherical 3D
