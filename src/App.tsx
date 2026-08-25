@@ -7,13 +7,13 @@ import { Stage } from './ui/Stage'
 import { useDoc } from './state/useDoc'
 import { BUILTIN_PALETTES, newPaletteId, paletteById } from './lib/palettes'
 import {
-  applyOrbStyle,
+  applyOrbType,
   DEFAULT_PATTERN_IDS,
   defaultDoc,
   defaultPatternColors,
   makePatternLayer,
 } from './lib/defaults'
-import { ORB_STYLE_LABELS, type LockSection, type OrbStyle } from './types'
+import { ORB_TYPE_LABELS, type LockSection, type OrbType } from './types'
 import { randomSeed } from './lib/rng'
 import { pickPalette, remix, remixSection, shuffleColors } from './lib/remix'
 import {
@@ -38,25 +38,13 @@ import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
 import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 
-const SECTION_KEYS = [
-  'canvas',
-  'background',
-  'orb',
-  'layers',
-  'shading',
-  'accents',
-  'palette',
-  'export',
-] as const
+const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'export'] as const
 
 const DEFAULT_OPEN: Record<string, boolean> = {
-  canvas: false,
-  background: false,
   orb: true,
-  layers: true,
-  shading: false,
-  accents: false,
   palette: true,
+  accents: false,
+  canvas: false,
   export: false,
 }
 
@@ -83,6 +71,9 @@ export default function App() {
       fitToStage: saved?.fitToStage ?? true,
       openSections: saved?.openSections ?? null,
       selectedLayerId: saved?.selectedLayerId ?? null,
+      // Fresh profiles start Simple; a returning profile (any saved UI state)
+      // is grandfathered into Advanced so no one wakes up to missing controls.
+      tier: saved?.tier ?? (saved ? ('advanced' as const) : ('simple' as const)),
     }
   })
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -202,6 +193,7 @@ export default function App() {
       fitToStage: ui.fitToStage,
       openSections: SECTION_KEYS.filter((k) => open[k]),
       selectedLayerId: ui.selectedLayerId,
+      tier: ui.tier,
     }
     pendingUi.current = snapshot
     const t = setTimeout(() => storage.saveUi(snapshot), 300)
@@ -247,15 +239,18 @@ export default function App() {
   /**
    * Remix All also re-rolls the palette, so the seed has to drive that choice
    * too — otherwise typing the seed back would not reproduce the output. The
-   * `colors` lock still wins, which is what makes it possible to explore
-   * geometry against a palette you have settled on.
+   * `colors` lock still wins, and so does the narrower `colors.palette`
+   * sub-lock — "I've settled on the palette, keep exploring inks". Both are
+   * safe to skip around: `pickPalette` draws from its own seeded stream, so
+   * skipping it cannot shift the main remix stream.
    */
   const doRemixAll = useCallback(
     (seed?: string) => {
       const next = seed ?? randomSeed()
-      const nextPalette = doc.locks.colors
-        ? palette
-        : pickPalette(palettes, next, doc.paletteId)
+      const nextPalette =
+        doc.locks.colors || doc.subLocks.colors.palette
+          ? palette
+          : pickPalette(palettes, next, doc.paletteId)
       replace(
         remix({ ...doc, paletteId: nextPalette.id }, next, {
           available,
@@ -360,21 +355,21 @@ export default function App() {
     [ingest, palette, rawUpdate, notify],
   )
 
-  const onApplyOrbStyle = useCallback(
-    (style: OrbStyle) => {
-      // One update() call, so the whole macro stays a single undo entry. The
+  const onSetOrbType = useCallback(
+    (type: OrbType) => {
+      // One update() call, so the whole switch stays a single undo entry. The
       // skipped list is read off the same computation the updater applies.
-      let skipped: LockSection[] = []
+      let skipped: ('orb' | 'patterns')[] = []
       rawUpdate((d) => {
-        const result = applyOrbStyle(d, style)
+        const result = applyOrbType(d, type)
         skipped = result.skipped
         return result.doc
       })
-      const label = ORB_STYLE_LABELS[style]
+      const label = ORB_TYPE_LABELS[type]
       notify(
         skipped.length > 0
-          ? `Composition style: ${label} (${skipped.join(', ')} locked — left as is)`
-          : `Composition style: ${label}`,
+          ? `Orb type: ${label} (${skipped.join(', ')} locked — left as is)`
+          : `Orb type: ${label}`,
       )
     },
     [rawUpdate, notify],
@@ -801,7 +796,9 @@ export default function App() {
         onAddPatternLayer={onAddPatternLayer}
         onSetLayerPattern={onSetLayerPattern}
         onSetSectorTexture={onSetSectorTexture}
-        onApplyOrbStyle={onApplyOrbStyle}
+        onSetOrbType={onSetOrbType}
+        tier={ui.tier}
+        onTierChange={(tier) => setUi((u) => ({ ...u, tier }))}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}
         patternOptions={patternOptions}

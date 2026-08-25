@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Field, NumberField } from './controls'
+import { Adv, Check, Field, NumberField, useTier } from './controls'
 
 export type ExportPanelProps = {
   seed: string
@@ -33,6 +33,7 @@ export function ExportPanel({
   onExportPng,
   onCopySvg,
 }: ExportPanelProps) {
+  const advanced = useTier() === 'advanced'
   const [custom, setCustom] = useState(3000)
   const longEdge = Math.max(canvas.width, canvas.height)
 
@@ -54,25 +55,26 @@ export function ExportPanel({
           transparent whether or not this is ticked.
         </div>
       )}
-      <div className="note">
-        Filenames use the seed: <strong>orb-{seed || 'seed'}.svg</strong>. This toggle also
-        applies to the <kbd>E</kbd> shortcut and to batch exports.
-      </div>
+      <Adv>
+        <div className="note">
+          Filenames use the seed: <strong>orb-{seed || 'seed'}.svg</strong>. This toggle also
+          applies to the <kbd>E</kbd> shortcut and to batch exports.
+        </div>
 
-      <Check
-        label="Expand pattern tiles"
-        checked={expandPatterns}
-        onChange={onExpandPatternsChange}
-      />
-      <div className="note">
-        On, tiled patterns are written out as real geometry. Browsers render an SVG
-        <code> &lt;pattern&gt;</code> fill fine, but design-tool importers commonly ignore it —
-        Figma drops it, leaving the gradient with no texture. Off gives a much smaller file that
-        is browser-only. PNG export never needs this.
-      </div>
+        <Check
+          label="Expand pattern tiles"
+          checked={expandPatterns}
+          onChange={onExpandPatternsChange}
+        />
+        <div className="note">
+          On, tiled patterns are written out as real geometry. Browsers render an SVG
+          <code> &lt;pattern&gt;</code> fill fine, but design-tool importers commonly ignore it —
+          Figma drops it, leaving the gradient with no texture. Off gives a much smaller file that
+          is browser-only. PNG export never needs this.
+        </div>
+      </Adv>
 
       <hr className="divider" />
-      <div className="eyebrow">Vector</div>
       <button
         type="button"
         className="btn btn--primary btn--block"
@@ -81,69 +83,83 @@ export function ExportPanel({
       >
         Download SVG
       </button>
-      <button
-        type="button"
-        className="btn btn--block"
-        disabled={busy}
-        onClick={() => onCopySvg(transparent)}
-      >
-        Copy SVG markup
-      </button>
+      {/* Simple: one raster button, at 2× — a summary of the matrix, not a removal. */}
+      {!advanced && (
+        <button
+          type="button"
+          className="btn btn--block"
+          disabled={busy}
+          title={dims(longEdge * 2)}
+          onClick={() => onExportPng(longEdge * 2, transparent)}
+        >
+          Download PNG ({dims(longEdge * 2)})
+        </button>
+      )}
+      <Adv>
+        <button
+          type="button"
+          className="btn btn--block"
+          disabled={busy}
+          onClick={() => onCopySvg(transparent)}
+        >
+          Copy SVG markup
+        </button>
 
-      <hr className="divider" />
-      <div className="eyebrow">Raster — scale</div>
-      <div className="grid3">
-        {SCALES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="btn"
-            disabled={busy}
-            title={dims(longEdge * s)}
-            onClick={() => onExportPng(longEdge * s, transparent)}
-          >
-            {s}×
-          </button>
-        ))}
-      </div>
-      <div className="note">
-        1× = {dims(longEdge)} · 2× = {dims(longEdge * 2)} · 4× = {dims(longEdge * 4)}
-      </div>
-
-      <div className="eyebrow">Raster — long edge</div>
-      <div className="grid3">
-        {SIZES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="btn"
-            disabled={busy}
-            title={dims(s)}
-            onClick={() => onExportPng(s, transparent)}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      <NumberField label="Custom long edge px" value={custom} min={16} max={16384} onChange={setCustom} />
-      <button
-        type="button"
-        className="btn btn--block"
-        disabled={busy}
-        onClick={() => onExportPng(custom, transparent)}
-      >
-        Download PNG at {dims(custom)}
-      </button>
-
-      <hr className="divider" />
-      <Field label="Notes">
-        <div className="note">
-          The exported SVG is a direct serialization of the live preview with all defs inlined, so it
-          opens standalone in a browser. Conic sweeps are built from wedge geometry rather than a CSS
-          conic gradient, so they survive export intact.
+        <hr className="divider" />
+        <div className="eyebrow">Raster — scale</div>
+        <div className="grid3">
+          {SCALES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className="btn"
+              disabled={busy}
+              title={dims(longEdge * s)}
+              onClick={() => onExportPng(longEdge * s, transparent)}
+            >
+              {s}×
+            </button>
+          ))}
         </div>
-      </Field>
+        <div className="note">
+          1× = {dims(longEdge)} · 2× = {dims(longEdge * 2)} · 4× = {dims(longEdge * 4)}
+        </div>
+
+        <div className="eyebrow">Raster — long edge</div>
+        <div className="grid3">
+          {SIZES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className="btn"
+              disabled={busy}
+              title={dims(s)}
+              onClick={() => onExportPng(s, transparent)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        <NumberField label="Custom long edge px" value={custom} min={16} max={16384} onChange={setCustom} />
+        <button
+          type="button"
+          className="btn btn--block"
+          disabled={busy}
+          onClick={() => onExportPng(custom, transparent)}
+        >
+          Download PNG at {dims(custom)}
+        </button>
+
+        <hr className="divider" />
+        <Field label="Notes">
+          <div className="note">
+            The exported SVG is a direct serialization of the live preview with all defs inlined, so it
+            opens standalone in a browser. Conic sweeps are built from wedge geometry rather than a CSS
+            conic gradient, so they survive export intact.
+          </div>
+        </Field>
+      </Adv>
     </>
   )
 }

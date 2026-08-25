@@ -871,3 +871,82 @@ textarea {
   clip-path: inset(50%);
   pointer-events: none;
 }
+
+/* ---------- v4: tier bar, constraint chips, layer cards ---------- */
+
+/* Sticky above the sections so "there is more" stays discoverable at any
+   scroll position. Same surface as the sidebar, hard 1px divider below. */
+.tierbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: var(--space-2) var(--space-3);
+  background: var(--ff-surface);
+  border-bottom: 1px solid var(--ff-divider);
+}
+
+.chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid var(--ff-divider);
+  color: var(--ff-text-muted);
+  cursor: pointer;
+}
+
+.chip--on {
+  background: var(--ff-accent);
+  border-color: var(--ff-accent);
+  color: #fff;
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--ff-accent);
+  outline-offset: 1px;
+}
+
+/* One pattern layer's editing card inside the Pattern type panel. */
+.layercard {
+  border: 1px solid var(--ff-divider-soft);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layercard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.layercard__title {
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  color: var(--ff-text);
+}
+
+/* Inline tools on an eyebrow row (the Advanced Shading block header). */
+.eyebrow__tools {
+  float: right;
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.lock--mini {
+  height: 18px;
+  font-size: 9px;
+}

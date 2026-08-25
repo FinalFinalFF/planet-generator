@@ -144,6 +144,8 @@ export type UiState = {
   fitToStage: boolean
   openSections: string[]
   selectedLayerId: string | null
+  /** The global Simple / Advanced tier. UI state, never doc state. */
+  tier?: 'simple' | 'advanced'
 }
 
 export function loadUi(): Partial<UiState> | null {

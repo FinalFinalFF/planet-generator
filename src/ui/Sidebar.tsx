@@ -2,26 +2,26 @@ import { useState } from 'react'
 import {
   BLEND_MODES,
   MASK_MODES,
-  ORB_STYLES,
-  ORB_STYLE_LABELS,
+  ORB_TYPES,
+  ORB_TYPE_LABELS,
   type AccentLayer,
   type BlendMode,
   type ColorRef,
+  type Gradient,
   type Layer,
   type LayerMask,
   type LockSection,
   type Palette,
   type PatternLayer,
   type OrbDoc,
-  type OrbStyle,
+  type OrbType,
   type Preset,
-  type SectorConfig,
   type SectorFill,
   type ShadingLayer,
-  type SliceConfig,
 } from '../types'
 import { Section } from './Section'
 import {
+  Adv,
   Check,
   ColorRefEditor,
   Field,
@@ -31,12 +31,14 @@ import {
   Select,
   Slider,
   TextField,
+  TierContext,
+  type Tier,
 } from './controls'
 import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
-import { DEFAULT_LAYER_MASK, detectOrbStyle, nextId } from '../lib/defaults'
+import { DEFAULT_LAYER_MASK, nextId } from '../lib/defaults'
 
 const BLEND_OPTIONS = BLEND_MODES.map((b) => ({ value: b, label: b }))
 const MASK_OPTIONS = MASK_MODES.map((m) => ({
@@ -67,108 +69,47 @@ export type SidebarProps = {
   onSetSectorTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
   palettePanel: Omit<PalettePanelProps, 'palette'>
   exportPanel: ExportPanelProps
-  onApplyOrbStyle: (style: OrbStyle) => void
+  /** Switch the orb type through `applyOrbType` (lock-respecting). */
+  onSetOrbType: (type: OrbType) => void
   /** Randomize one section, leaving the rest of the composition alone. */
   onRandomizeSection: (section: Exclude<LockSection, 'colors'>) => void
   /** The Palette section's dice picks a different palette. */
   onRandomizePalette: () => void
   /** Built-in library plus anything imported this session. */
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
+  /** The global Simple / Advanced tier — persisted UI state, never doc state. */
+  tier: Tier
+  onTierChange: (tier: Tier) => void
 }
 
-/* ---------- sliced-sphere controls ---------- */
+/* ---------- small chrome ---------- */
 
-function SliceControls({
-  slices,
-  onPatch,
+/**
+ * The standing-constraint chips (Flat, Solid fills, Hide orb): compact toggles
+ * whose explainer lives in the tooltip — the house style for load-bearing
+ * semantics. Accent-filled when on.
+ */
+function ConstraintChip({
+  label,
+  on,
+  title,
+  onToggle,
 }: {
-  slices: SliceConfig
-  onPatch: (patch: Partial<SliceConfig>, coalesce?: string) => void
+  label: string
+  on: boolean
+  title: string
+  onToggle: (on: boolean) => void
 }) {
   return (
-    <>
-      <Segmented
-        label="Families"
-        value={slices.families === 1 ? '1' : '2'}
-        options={[
-          { value: '1', label: '1 · bands' },
-          { value: '2', label: '2 · lattice' },
-        ]}
-        onChange={(v) => onPatch({ families: v === '1' ? 1 : 2 })}
-      />
-      <Slider
-        label="Slices per family"
-        value={slices.count}
-        min={1}
-        max={64}
-        step={1}
-        decimals={0}
-        onChange={(count) => onPatch({ count }, 'sl-count')}
-      />
-      <Slider
-        label="Sweep angle"
-        value={slices.angle}
-        min={0}
-        max={360}
-        step={1}
-        suffix="°"
-        onChange={(angle) => onPatch({ angle }, 'sl-angle')}
-      />
-      <Slider
-        label="Fan between families"
-        value={slices.fan}
-        min={0}
-        max={180}
-        step={1}
-        suffix="°"
-        onChange={(fan) => onPatch({ fan }, 'sl-fan')}
-      />
-      <Slider
-        label="Curvature"
-        value={slices.curvature}
-        min={1.02}
-        max={8}
-        onChange={(curvature) => onPatch({ curvature }, 'sl-curv')}
-      />
-      <Slider
-        label="Band squash"
-        value={slices.arc}
-        min={0.05}
-        max={3}
-        onChange={(arc) => onPatch({ arc }, 'sl-arc')}
-      />
-      <Slider
-        label="Base opacity"
-        value={slices.alpha}
-        min={0.05}
-        max={1}
-        onChange={(alpha) => onPatch({ alpha }, 'sl-alpha')}
-      />
-      <Slider
-        label="Lattice strength"
-        value={slices.modulation}
-        min={0}
-        max={1}
-        onChange={(modulation) => onPatch({ modulation }, 'sl-mod')}
-      />
-      <Slider
-        label="Second-family ramp offset"
-        value={slices.phase}
-        min={0}
-        max={1}
-        onChange={(phase) => onPatch({ phase }, 'sl-phase')}
-      />
-      <Select
-        label="Lattice blend"
-        value={slices.blend}
-        options={BLEND_OPTIONS}
-        onChange={(blend) => onPatch({ blend })}
-      />
-      <div className="note">
-        Keep base opacity near 1 — that is what leaves a crescent of each disc visible.
-        Lower it and the bands wash together.
-      </div>
-    </>
+    <button
+      type="button"
+      className={`chip${on ? ' chip--on' : ''}`}
+      title={title}
+      aria-pressed={on}
+      onClick={() => onToggle(!on)}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -247,7 +188,8 @@ function SectorRowEditor({
                   if (defaultTextureId) onSetTexture(rowKey, i, defaultTextureId)
                   return
                 }
-                // Keep the ink when switching kinds, so toggling is not destructive.
+                // Keep the ink when switching kinds, so toggling is not
+                // destructive; the cell's locks travel with it.
                 const ink = carriedInk(fill)
                 patchCell(
                   i,
@@ -257,8 +199,9 @@ function SectorRowEditor({
                         from: ink,
                         to: { slot: Math.max(0, palette.colors.length - 1) },
                         angle: 90,
+                        locks: fill.locks,
                       }
-                    : { kind: 'flat', color: ink },
+                    : { kind: 'flat', color: ink, locks: fill.locks },
                 )
               }}
             />
@@ -284,15 +227,17 @@ function SectorRowEditor({
                   palette={palette}
                   onChange={(to) => patchCell(i, { ...fill, to })}
                 />
-                <Slider
-                  label="Ramp angle"
-                  value={fill.angle}
-                  min={0}
-                  max={360}
-                  step={1}
-                  suffix="°"
-                  onChange={(angle) => patchCell(i, { ...fill, angle })}
-                />
+                <Adv>
+                  <Slider
+                    label="Ramp angle"
+                    value={fill.angle}
+                    min={0}
+                    max={360}
+                    step={1}
+                    suffix="°"
+                    onChange={(angle) => patchCell(i, { ...fill, angle })}
+                  />
+                </Adv>
               </>
             )}
             {fill.kind === 'texture' && (
@@ -306,24 +251,26 @@ function SectorRowEditor({
                   }))}
                   onChange={(id) => onSetTexture(rowKey, i, id)}
                 />
-                <div className="grid2">
-                  <Slider
-                    label="Scale"
-                    value={fill.scale}
-                    min={0.2}
-                    max={4}
-                    onChange={(scale) => patchCell(i, { ...fill, scale })}
-                  />
-                  <Slider
-                    label="Rotation"
-                    value={fill.rotation}
-                    min={0}
-                    max={360}
-                    step={1}
-                    suffix="°"
-                    onChange={(rotation) => patchCell(i, { ...fill, rotation })}
-                  />
-                </div>
+                <Adv>
+                  <div className="grid2">
+                    <Slider
+                      label="Scale"
+                      value={fill.scale}
+                      min={0.2}
+                      max={4}
+                      onChange={(scale) => patchCell(i, { ...fill, scale })}
+                    />
+                    <Slider
+                      label="Rotation"
+                      value={fill.rotation}
+                      min={0}
+                      max={360}
+                      step={1}
+                      suffix="°"
+                      onChange={(rotation) => patchCell(i, { ...fill, rotation })}
+                    />
+                  </div>
+                </Adv>
                 {parsed?.groups.map((g) => (
                   <ColorRefEditor
                     key={g.index}
@@ -346,59 +293,6 @@ function SectorRowEditor({
           </div>
         )
       })}
-    </>
-  )
-}
-
-function SectorControls({
-  sectors,
-  palette,
-  parsedById,
-  patternOptions,
-  onPatch,
-  onSetTexture,
-}: {
-  sectors: SectorConfig
-  palette: Palette
-  parsedById: Map<string, ParsedPattern>
-  patternOptions: Array<{ id: string; name: string; imported: boolean }>
-  onPatch: (patch: Partial<SectorConfig>, coalesce?: string) => void
-  onSetTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
-}) {
-  const rowProps = { palette, parsedById, patternOptions, onSetTexture }
-  return (
-    <>
-      <Slider
-        label="Split angle"
-        value={sectors.angle}
-        min={0}
-        max={360}
-        step={1}
-        suffix="°"
-        onChange={(angle) => onPatch({ angle }, 'sec-angle')}
-      />
-      <Slider
-        label="Split offset"
-        value={sectors.offset}
-        min={-0.9}
-        max={0.9}
-        onChange={(offset) => onPatch({ offset }, 'sec-offset')}
-      />
-      <SectorRowEditor
-        rowKey="rowA"
-        label="Row A"
-        row={sectors.rowA}
-        onChange={(rowA) => onPatch({ rowA })}
-        {...rowProps}
-      />
-      <hr className="divider" />
-      <SectorRowEditor
-        rowKey="rowB"
-        label="Row B"
-        row={sectors.rowB}
-        onChange={(rowB) => onPatch({ rowB })}
-        {...rowProps}
-      />
     </>
   )
 }
@@ -458,279 +352,248 @@ function MaskControls({
   )
 }
 
-export function Sidebar(props: SidebarProps) {
+/* ---------- fill editing (color panel + pattern base) ---------- */
+
+/** Every stop the same color ⇒ the gradient renders as a flat ink. */
+function isFlatFill(g: Gradient): boolean {
+  const first = g.stops[0]?.color
+  if (!first) return false
+  return g.stops.every(
+    (s) => s.color.slot === first.slot && (s.color.hex ?? null) === (first.hex ?? null),
+  )
+}
+
+/**
+ * The base fill: FLAT edits one ink written as a two-stop constant gradient
+ * (no second render path to maintain); GRADIENT is the full editor, tiered.
+ */
+function FillEditor({
+  label,
+  gradient,
+  palette,
+  onChange,
+}: {
+  label: string
+  gradient: Gradient
+  palette: Palette
+  onChange: (g: Gradient, coalesce?: string) => void
+}) {
+  const flat = isFlatFill(gradient)
+  return (
+    <>
+      <Segmented
+        label={label}
+        value={flat ? 'flat' : 'gradient'}
+        options={[
+          { value: 'flat', label: 'flat color' },
+          { value: 'gradient', label: 'gradient' },
+        ]}
+        onChange={(v) => {
+          if (v === (flat ? 'flat' : 'gradient')) return
+          if (v === 'flat') {
+            const ink = gradient.stops[0]?.color ?? { slot: 4 }
+            onChange({
+              ...gradient,
+              type: 'linear',
+              stops: [
+                { id: nextId('s'), offset: 0, color: { ...ink } },
+                { id: nextId('s'), offset: 1, color: { ...ink } },
+              ],
+            })
+          } else {
+            const from = gradient.stops[0]?.color ?? { slot: 2 }
+            onChange({
+              ...gradient,
+              stops: [
+                { id: nextId('s'), offset: 0, color: { ...from } },
+                {
+                  id: nextId('s'),
+                  offset: 1,
+                  color: { slot: Math.max(0, palette.colors.length - 1) },
+                },
+              ],
+            })
+          }
+        }}
+      />
+      {flat ? (
+        <ColorRefEditor
+          name="Ink"
+          value={gradient.stops[0].color}
+          palette={palette}
+          showAlpha={false}
+          onChange={(color) =>
+            onChange({
+              ...gradient,
+              stops: gradient.stops.map((s) => ({ ...s, color: { ...color } })),
+            })
+          }
+        />
+      ) : (
+        <GradientEditor gradient={gradient} palette={palette} onChange={onChange} />
+      )}
+    </>
+  )
+}
+
+/* ---------- 01 Orb ---------- */
+
+function OrbSection(props: SidebarProps) {
   const { doc, palette, parsedById, open, onToggleSection, update, onRandomizeSection } = props
 
-  const setLock = (section: LockSection, on: boolean) =>
-    update((d) => ({ ...d, locks: { ...d.locks, [section]: on } }))
+  const patchOrb = (patch: Partial<OrbDoc['orb']>, coalesce?: string) =>
+    update((d) => ({ ...d, orb: { ...d.orb, ...patch } }), coalesce)
 
-  const lockFor = (section: LockSection) => ({
-    section,
-    on: doc.locks[section],
-    onToggle: (on: boolean) => setLock(section, on),
-  })
-
-  // A lock is absolute, so a locked section's dice is dead.
-  const diceFor = (section: Exclude<LockSection, 'colors'>, label: string) => ({
-    label: `Randomize ${label} only`,
-    onRandomize: () => onRandomizeSection(section),
-    disabled: doc.locks[section],
-  })
+  const typeHint = ORB_TYPE_LABELS[doc.orbType].toLowerCase()
 
   return (
-    <aside className="sidebar">
-      {/* 01 — Canvas */}
-      <Section
-        num="01"
-        title="Canvas"
-        hint={`${doc.canvas.width}×${doc.canvas.height}`}
-        open={open.canvas}
-        onToggle={() => onToggleSection('canvas')}
-      >
-        <Segmented
-          label="Preset size"
-          value={
-            ASPECTS.find((a) => a.w === doc.canvas.width && a.h === doc.canvas.height)?.label ??
-            'custom'
-          }
-          options={[...ASPECTS.map((a) => ({ value: a.label, label: a.label })), { value: 'custom', label: 'custom' }]}
-          onChange={(label) => {
-            const a = ASPECTS.find((x) => x.label === label)
-            if (a) update((d) => ({ ...d, canvas: { width: a.w, height: a.h } }))
-          }}
+    <Section
+      num="01"
+      title="Orb"
+      hint={doc.orb.visible ? typeHint : `${typeHint} · hidden`}
+      open={open.orb}
+      onToggle={() => onToggleSection('orb')}
+      lock={{
+        section: 'orb',
+        on: doc.locks.orb,
+        onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, orb: on } })),
+      }}
+      randomize={{
+        label: 'Randomize the orb only',
+        onRandomize: () => onRandomizeSection('orb'),
+        disabled: doc.locks.orb,
+      }}
+    >
+      <Segmented
+        label="Type"
+        value={doc.orbType}
+        options={ORB_TYPES.map((t) => ({ value: t, label: ORB_TYPE_LABELS[t] }))}
+        onChange={(t) => props.onSetOrbType(t)}
+      />
+      <Slider
+        label="Size"
+        value={doc.orb.radius}
+        min={0.05}
+        max={1.4}
+        onChange={(radius) => patchOrb({ radius }, 'orb-r')}
+      />
+      <div className="chiprow">
+        <ConstraintChip
+          label="Hide orb"
+          on={!doc.orb.visible}
+          title="Hide the orb entirely — background, accents and canvas remain."
+          onToggle={(on) => patchOrb({ visible: !on })}
         />
-        <div className="grid2">
-          <NumberField
-            label="Width px"
-            value={doc.canvas.width}
-            min={64}
-            max={8192}
-            onChange={(width) => update((d) => ({ ...d, canvas: { ...d.canvas, width } }))}
-          />
-          <NumberField
-            label="Height px"
-            value={doc.canvas.height}
-            min={64}
-            max={8192}
-            onChange={(height) => update((d) => ({ ...d, canvas: { ...d.canvas, height } }))}
-          />
-        </div>
-        <button
-          type="button"
-          className="btn btn--block"
-          onClick={() =>
-            update((d) => ({ ...d, canvas: { width: d.canvas.height, height: d.canvas.width } }))
-          }
-        >
-          Swap orientation
-        </button>
-      </Section>
-
-      {/* 02 — Background */}
-      <Section
-        num="02"
-        title="Background"
-        hint={doc.background.kind}
-        open={open.background}
-        onToggle={() => onToggleSection('background')}
-        lock={lockFor('background')}
-        randomize={diceFor('background', 'the background')}
-      >
-        <Segmented
-          label="Fill"
-          value={doc.background.kind}
-          options={[
-            { value: 'solid', label: 'solid' },
-            { value: 'gradient', label: 'gradient' },
-            { value: 'transparent', label: 'none' },
-          ]}
-          onChange={(kind) => update((d) => ({ ...d, background: { ...d.background, kind } }))}
+        <ConstraintChip
+          label="Flat"
+          on={doc.flat}
+          title="Suppresses shading and the crescent rim light at render time. Gradients, patterns, rings, satellites and the vignette stay. Settings are kept, so turning it off restores them."
+          onToggle={(flat) => update((d) => ({ ...d, flat }))}
         />
-        {doc.background.kind === 'solid' && (
-          <ColorRefEditor
-            name="Background color"
-            value={doc.background.color}
-            palette={palette}
-            onChange={(color) => update((d) => ({ ...d, background: { ...d.background, color } }))}
-          />
-        )}
-        {doc.background.kind === 'gradient' && (
-          <GradientEditor
-            gradient={doc.background.gradient}
-            palette={palette}
-            onChange={(gradient, coalesce) =>
-              update((d) => ({ ...d, background: { ...d.background, gradient } }), coalesce)
-            }
-          />
-        )}
-        <Slider
-          label="Vignette"
-          value={doc.background.vignette}
-          min={0}
-          max={1}
-          onChange={(vignette) =>
-            update((d) => ({ ...d, background: { ...d.background, vignette } }), 'bg-vig')
-          }
+        <ConstraintChip
+          label="Solid fills"
+          on={doc.solidFills}
+          title="Renders every smooth gradient as a flat ink sampled from its own ramp: the disc fill, the background, sector ramps and the vignette. Gradient settings are kept, so turning it off restores them."
+          onToggle={(solidFills) => update((d) => ({ ...d, solidFills }))}
         />
-      </Section>
-
-      {/* 03 — Orb */}
-      <Section
-        num="03"
-        title="Orb"
-        hint={doc.orb.mode === 'disc' ? doc.orb.gradient.type : doc.orb.mode}
-        open={open.orb}
-        onToggle={() => onToggleSection('orb')}
-        lock={lockFor('orb')}
-        randomize={diceFor('orb', 'the orb')}
-      >
-        {/* Deliberately not called "Orb style": it reaches outside this
-            section. It lives here because that is where it is looked for. */}
-        <Select
-          label="Composition style"
-          value={detectOrbStyle(doc)}
-          options={[
-            ...ORB_STYLES.map((s) => ({ value: s, label: ORB_STYLE_LABELS[s] })),
-            { value: 'custom' as const, label: 'Custom' },
-          ]}
-          onChange={(style) => {
-            if (style === 'custom') return
-            props.onApplyOrbStyle(style as OrbStyle)
-          }}
-        />
-        <div className="note">
-          Rewrites orb mode, shading, and layer visibility together. Locked sections are
-          left alone.
-        </div>
-
-        {/*
-          Flat mode sits next to Composition style because both reach outside this
-          section, and this is where a cross-cutting control is looked for. It is
-          one control, deliberately: a standing constraint rather than a macro, so
-          it stays on through any style and any remix.
-        */}
-        <Check
-          label="Flat mode — no 3D cues"
-          checked={doc.flat}
-          onChange={(flat) => update((d) => ({ ...d, flat }))}
-        />
-        <div className="note">
-          Suppresses shading and the crescent rim light at render time. Gradients, patterns,
-          rings, satellites and the vignette stay. Settings are kept, so turning it off
-          restores them.
-        </div>
-        <Check
-          label="Solid fills — no gradients"
-          checked={doc.solidFills}
-          onChange={(solidFills) => update((d) => ({ ...d, solidFills }))}
-        />
-        <div className="note">
-          Renders every smooth gradient as a flat ink sampled from its own ramp: the disc fill,
-          the background, sector ramps and the vignette. Sliced bands stay (already flat fills).
-          Gradient settings are kept, so turning it off restores them.
-        </div>
-        <Check
-          label="Visible"
-          checked={doc.orb.visible}
-          onChange={(visible) => update((d) => ({ ...d, orb: { ...d.orb, visible } }))}
-        />
-        <Segmented
-          label="Render mode"
-          value={doc.orb.mode}
-          options={[
-            { value: 'disc', label: 'disc' },
-            { value: 'sliced', label: 'sliced' },
-            { value: 'sectors', label: 'sectors' },
-          ]}
-          onChange={(mode) => update((d) => ({ ...d, orb: { ...d.orb, mode } }))}
-        />
-        <Slider
-          label="Radius"
-          value={doc.orb.radius}
-          min={0.05}
-          max={1.4}
-          onChange={(radius) => update((d) => ({ ...d, orb: { ...d.orb, radius } }), 'pl-r')}
-        />
+      </div>
+      <Adv>
         <div className="grid2">
           <Slider
             label="Center X"
             value={doc.orb.cx}
             min={-0.5}
             max={1.5}
-            onChange={(cx) => update((d) => ({ ...d, orb: { ...d.orb, cx } }), 'pl-cx')}
+            onChange={(cx) => patchOrb({ cx }, 'orb-cx')}
           />
           <Slider
             label="Center Y"
             value={doc.orb.cy}
             min={-0.5}
             max={1.5}
-            onChange={(cy) => update((d) => ({ ...d, orb: { ...d.orb, cy } }), 'pl-cy')}
+            onChange={(cy) => patchOrb({ cy }, 'orb-cy')}
           />
         </div>
+      </Adv>
+      <hr className="divider" />
+
+      {/* Mode-dependent panel: only what the chosen type can use. */}
+      {doc.orbType === 'color' && (
+        <FillEditor
+          label="Fill"
+          gradient={doc.orb.gradient}
+          palette={palette}
+          onChange={(gradient, coalesce) => patchOrb({ gradient }, coalesce)}
+        />
+      )}
+
+      {doc.orbType === 'pattern' && <PatternPanel {...props} />}
+
+      {doc.orbType === 'segments' && (
+        <>
+          <div className="eyebrow">Structure</div>
+          <Slider
+            label="Split angle"
+            value={doc.orb.sectors.angle}
+            min={0}
+            max={360}
+            step={1}
+            suffix="°"
+            onChange={(angle) =>
+              update(
+                (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, angle } } }),
+                'sec-angle',
+              )
+            }
+          />
+          <Adv>
+            <Slider
+              label="Split offset"
+              value={doc.orb.sectors.offset}
+              min={-0.9}
+              max={0.9}
+              onChange={(offset) =>
+                update(
+                  (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, offset } } }),
+                  'sec-offset',
+                )
+              }
+            />
+          </Adv>
+          <SectorRowEditor
+            rowKey="rowA"
+            label="Row A"
+            row={doc.orb.sectors.rowA}
+            palette={palette}
+            parsedById={parsedById}
+            patternOptions={props.patternOptions}
+            onSetTexture={props.onSetSectorTexture}
+            onChange={(rowA) =>
+              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowA } } }))
+            }
+          />
+          <hr className="divider" />
+          <SectorRowEditor
+            rowKey="rowB"
+            label="Row B"
+            row={doc.orb.sectors.rowB}
+            palette={palette}
+            parsedById={parsedById}
+            patternOptions={props.patternOptions}
+            onSetTexture={props.onSetSectorTexture}
+            onChange={(rowB) =>
+              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowB } } }))
+            }
+          />
+        </>
+      )}
+
+      <Adv>
         <hr className="divider" />
-        {doc.orb.mode === 'sliced' && (
-          <>
-            <div className="eyebrow">Slices</div>
-            <div className="note">
-              Two families of translucent circles march along directions “fan” degrees apart;
-              where they cross they compound into flat cells. The ramp below colors them.
-            </div>
-            <SliceControls
-              slices={doc.orb.slices}
-              onPatch={(patch, coalesce) =>
-                update(
-                  (d) => ({ ...d, orb: { ...d.orb, slices: { ...d.orb.slices, ...patch } } }),
-                  coalesce,
-                )
-              }
-            />
-            <hr className="divider" />
-          </>
-        )}
-        {doc.orb.mode === 'sectors' && (
-          <>
-            <div className="eyebrow">Sectors</div>
-            <div className="note">
-              One chord splits the disc into two rows; each row splits crosswise into equal
-              cells. Every cell paints independently, hard-edged — a collage, not a sphere.
-            </div>
-            <SectorControls
-              sectors={doc.orb.sectors}
-              palette={palette}
-              parsedById={parsedById}
-              patternOptions={props.patternOptions}
-              onSetTexture={props.onSetSectorTexture}
-              onPatch={(patch, coalesce) =>
-                update(
-                  (d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, ...patch } } }),
-                  coalesce,
-                )
-              }
-            />
-            <hr className="divider" />
-          </>
-        )}
-        {doc.orb.mode !== 'sectors' && (
-          <>
-            <div className="eyebrow">
-              {doc.orb.mode === 'sliced' ? 'Slice color ramp' : 'Fill'}
-            </div>
-            <GradientEditor
-              gradient={doc.orb.gradient}
-              palette={palette}
-              onChange={(gradient, coalesce) =>
-                update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
-              }
-            />
-            <hr className="divider" />
-          </>
-        )}
         <Check
           label="Outline"
           checked={doc.orb.stroke.enabled}
-          onChange={(enabled) =>
-            update((d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, enabled } } }))
-          }
+          onChange={(enabled) => patchOrb({ stroke: { ...doc.orb.stroke, enabled } })}
         />
         {doc.orb.stroke.enabled && (
           <>
@@ -741,12 +604,7 @@ export function Sidebar(props: SidebarProps) {
               max={40}
               step={0.2}
               decimals={1}
-              onChange={(width) =>
-                update(
-                  (d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, width } } }),
-                  'pl-sw',
-                )
-              }
+              onChange={(width) => patchOrb({ stroke: { ...doc.orb.stroke, width } }, 'orb-sw')}
             />
             <Slider
               label="Outline opacity"
@@ -754,10 +612,7 @@ export function Sidebar(props: SidebarProps) {
               min={0}
               max={1}
               onChange={(opacity) =>
-                update(
-                  (d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, opacity } } }),
-                  'pl-so',
-                )
+                patchOrb({ stroke: { ...doc.orb.stroke, opacity } }, 'orb-so')
               }
             />
             <ColorRefEditor
@@ -765,54 +620,308 @@ export function Sidebar(props: SidebarProps) {
               value={doc.orb.stroke.color}
               palette={palette}
               showAlpha={false}
-              onChange={(color) =>
-                update((d) => ({ ...d, orb: { ...d.orb, stroke: { ...d.orb.stroke, color } } }))
-              }
+              onChange={(color) => patchOrb({ stroke: { ...doc.orb.stroke, color } })}
             />
           </>
         )}
-      </Section>
-
-      {/* 04 — Layers */}
-      <LayersSection {...props} />
-
-      {/* 05 — Shading */}
-      <ShadingSection {...props} />
-
-      {/* 06 — Accents */}
-      <AccentsSection {...props} />
-
-      {/* 07 — Palette */}
-      <Section
-        num="07"
-        title="Palette"
-        hint={palette.name}
-        open={open.palette}
-        onToggle={() => onToggleSection('palette')}
-        lock={lockFor('colors')}
-        randomize={{
-          label: 'Switch to a random palette',
-          onRandomize: props.onRandomizePalette,
-          disabled: doc.locks.colors,
-        }}
-      >
-        <PalettePanel palette={palette} {...props.palettePanel} />
-      </Section>
-
-      {/* 08 — Export */}
-      <Section
-        num="08"
-        title="Export"
-        open={open.export}
-        onToggle={() => onToggleSection('export')}
-      >
-        <ExportPanel {...props.exportPanel} />
-      </Section>
-    </aside>
+        <ShadingBlock {...props} />
+        <StackBlock {...props} />
+      </Adv>
+    </Section>
   )
 }
 
-/* ---------- 04: the reorderable layer stack ---------- */
+/* ---------- the Pattern type panel ---------- */
+
+function PatternPanel(props: SidebarProps) {
+  const { doc, palette, parsedById, update } = props
+  const patternLayers = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
+  const visible = patternLayers.filter((l) => l.visible)
+  const [addId, setAddId] = useState(props.patternOptions[0]?.id ?? '')
+
+  const patch = (id: string, recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) =>
+    update(
+      (d) => ({
+        ...d,
+        layers: d.layers.map((l) => (l.id === id && l.kind === 'pattern' ? recipe(l) : l)),
+      }),
+      coalesce,
+    )
+
+  return (
+    <>
+      <div className="eyebrow">Base</div>
+      <FillEditor
+        label="Base fill"
+        gradient={doc.orb.gradient}
+        palette={palette}
+        onChange={(gradient, coalesce) =>
+          update((d) => ({ ...d, orb: { ...d.orb, gradient } }), coalesce)
+        }
+      />
+      <hr className="divider" />
+      <div className="eyebrow">Layers · {visible.length} of {patternLayers.length}</div>
+      <Check
+        label="Lock layer count for remix"
+        checked={doc.subLocks.patterns.count}
+        onChange={(count) =>
+          update((d) => ({
+            ...d,
+            subLocks: { ...d.subLocks, patterns: { ...d.subLocks.patterns, count } },
+          }))
+        }
+      />
+      {patternLayers.map((layer, i) => (
+        <div key={layer.id} className="layercard">
+          <div className="layercard__head">
+            <button
+              type="button"
+              className="layer__mini"
+              title={layer.visible ? 'Hide layer' : 'Show layer'}
+              onClick={() => patch(layer.id, (l) => ({ ...l, visible: !l.visible }))}
+            >
+              {layer.visible ? '●' : '○'}
+            </button>
+            <span className="layercard__title">Layer {i + 1}</span>
+            <span className="section__hint">{layer.name}</span>
+          </div>
+          {layer.visible && (
+            <PatternLayerEditor
+              layer={layer}
+              palette={palette}
+              parsed={parsedById.get(layer.patternId)}
+              patternOptions={props.patternOptions}
+              onSetPattern={(patternId) => props.onSetLayerPattern(layer.id, patternId)}
+              onPatch={(recipe, coalesce) => patch(layer.id, recipe, coalesce)}
+            />
+          )}
+        </div>
+      ))}
+      {visible.length < 2 && (
+        <Field label="Add pattern layer">
+          <div className="field__row">
+            <select
+              className="select"
+              value={addId}
+              aria-label="Pattern to add"
+              onChange={(e) => setAddId(e.target.value)}
+            >
+              {props.patternOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.imported ? `${p.name} (imported)` : p.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => addId && props.onAddPatternLayer(addId)}
+            >
+              Add
+            </button>
+          </div>
+        </Field>
+      )}
+      <div className="note">
+        Drop <strong>.svg</strong> files anywhere to add your own patterns — they run through the
+        same fill extraction and palette-slot mapping as the built-ins, and become available to
+        Remix.
+      </div>
+    </>
+  )
+}
+
+function PatternLayerEditor({
+  layer,
+  palette,
+  parsed,
+  patternOptions,
+  onSetPattern,
+  onPatch,
+}: {
+  layer: PatternLayer
+  palette: Palette
+  parsed: ParsedPattern | undefined
+  patternOptions: SidebarProps['patternOptions']
+  onSetPattern: (patternId: string) => void
+  onPatch: (recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) => void
+}) {
+  return (
+    <>
+      <Select
+        label="Pattern"
+        value={layer.patternId}
+        options={patternOptions.map((p) => ({
+          value: p.id,
+          label: p.imported ? `${p.name} (imported)` : p.name,
+        }))}
+        onChange={onSetPattern}
+      />
+      <Slider
+        label="Scale"
+        value={layer.scale}
+        min={0.05}
+        max={4}
+        onChange={(scale) => onPatch((l) => ({ ...l, scale }), `pat-s-${layer.id}`)}
+      />
+      <Slider
+        label="Opacity"
+        value={layer.opacity}
+        min={0}
+        max={1}
+        onChange={(opacity) => onPatch((l) => ({ ...l, opacity }), `pat-op-${layer.id}`)}
+      />
+      {/* Passive state tags: hidden advanced state that changes pixels must
+          never be invisible in Simple. */}
+      {(layer.blend !== 'normal' || layer.mask.mode !== 'orb') && (
+        <div className="note">
+          {layer.blend !== 'normal' ? `blend: ${layer.blend}` : ''}
+          {layer.blend !== 'normal' && layer.mask.mode !== 'orb' ? ' · ' : ''}
+          {layer.mask.mode !== 'orb'
+            ? `mask: ${layer.mask.mode}${layer.mask.feather > 0 ? ` · feather ${layer.mask.feather.toFixed(2)}` : ''}`
+            : ''}
+        </div>
+      )}
+      <Adv>
+        <TextField
+          label="Layer name"
+          value={layer.name}
+          mono={false}
+          onCommit={(name) => onPatch((l) => ({ ...l, name }))}
+        />
+        <Segmented
+          label="Fit"
+          value={layer.fit}
+          options={[
+            { value: 'tile', label: 'tile' },
+            { value: 'cover', label: 'cover' },
+          ]}
+          onChange={(fit) => onPatch((l) => ({ ...l, fit }))}
+        />
+        <Slider
+          label="Rotation"
+          value={layer.rotation}
+          min={-180}
+          max={180}
+          step={1}
+          suffix="°"
+          onChange={(rotation) => onPatch((l) => ({ ...l, rotation }), `pat-rot-${layer.id}`)}
+        />
+        <div className="grid2">
+          <Slider
+            label="Offset X"
+            value={layer.offsetX}
+            min={-1}
+            max={1}
+            onChange={(offsetX) => onPatch((l) => ({ ...l, offsetX }), `pat-ox-${layer.id}`)}
+          />
+          <Slider
+            label="Offset Y"
+            value={layer.offsetY}
+            min={-1}
+            max={1}
+            onChange={(offsetY) => onPatch((l) => ({ ...l, offsetY }), `pat-oy-${layer.id}`)}
+          />
+        </div>
+        <Select
+          label="Blend mode"
+          value={layer.blend}
+          options={BLEND_OPTIONS}
+          onChange={(blend) => onPatch((l) => ({ ...l, blend }))}
+        />
+        <div className="eyebrow">Overlap region</div>
+        <MaskControls
+          mask={layer.mask ?? DEFAULT_LAYER_MASK}
+          onPatch={(patch, coalesce) =>
+            onPatch(
+              (l) => ({ ...l, mask: { ...(l.mask ?? DEFAULT_LAYER_MASK), ...patch } }),
+              coalesce,
+            )
+          }
+        />
+      </Adv>
+      <div className="eyebrow">Inks</div>
+      {!parsed && <div className="note">Loading pattern…</div>}
+      {parsed?.groups.map((group) => (
+        <ColorRefEditor
+          key={group.index}
+          name={group.label}
+          chip={group.sample}
+          value={layer.colors[group.index] ?? { slot: 0, alpha: group.isBackground ? 0 : 1 }}
+          palette={palette}
+          onChange={(color) =>
+            onPatch((l) => {
+              const colors = l.colors.slice()
+              while (colors.length <= group.index) colors.push({ slot: 0, alpha: 1 })
+              colors[group.index] = color
+              return { ...l, colors }
+            })
+          }
+        />
+      ))}
+    </>
+  )
+}
+
+/* ---------- Advanced blocks inside Orb: shading + the raw stack ---------- */
+
+function ShadingBlock({ doc, palette, update, onRandomizeSection }: SidebarProps) {
+  const layer = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
+  const patch = (recipe: (l: ShadingLayer) => ShadingLayer, coalesce?: string) => {
+    if (!layer) return
+    update(
+      (d) => ({
+        ...d,
+        layers: d.layers.map((l) => (l.id === layer.id ? recipe(l as ShadingLayer) : l)),
+      }),
+      coalesce,
+    )
+  }
+  return (
+    <>
+      <hr className="divider" />
+      <div className="eyebrow">
+        Shading
+        <span className="eyebrow__tools">
+          <button
+            type="button"
+            className={`lock lock--mini${doc.locks.shading ? ' lock--on' : ''}`}
+            title="Freeze the shading against Remix"
+            aria-pressed={doc.locks.shading}
+            onClick={() =>
+              update((d) => ({ ...d, locks: { ...d.locks, shading: !d.locks.shading } }))
+            }
+          >
+            {doc.locks.shading ? 'LOCKED' : 'LOCK'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--tiny"
+            disabled={doc.locks.shading || !layer}
+            onClick={() => onRandomizeSection('shading')}
+          >
+            randomize
+          </button>
+        </span>
+      </div>
+      {!layer ? (
+        <div className="note">No shading layer. Add one from the Stack below.</div>
+      ) : (
+        <>
+          {doc.flat && <div className="note">Flat mode — shading suppressed.</div>}
+          <Inert disabled={doc.flat}>
+            <Check
+              label="Visible"
+              checked={layer.visible}
+              onChange={(visible) => patch((l) => ({ ...l, visible }))}
+            />
+            {layer.visible && <ShadingControls layer={layer} palette={palette} onPatch={patch} />}
+          </Inert>
+        </>
+      )}
+    </>
+  )
+}
 
 const LAYER_KIND_LABEL: Record<Layer['kind'], string> = {
   pattern: 'PAT',
@@ -820,25 +929,14 @@ const LAYER_KIND_LABEL: Record<Layer['kind'], string> = {
   accent: 'ACC',
 }
 
-function LayersSection({
-  doc,
-  palette,
-  parsedById,
-  open,
-  onToggleSection,
-  selectedLayerId,
-  onSelectLayer,
-  update,
-  onAddPatternLayer,
-  onSetLayerPattern,
-  onRandomizeSection,
-  patternOptions,
-}: SidebarProps) {
-  const patch = (id: string, recipe: (l: Layer) => Layer, coalesce?: string) =>
-    update(
-      (d) => ({ ...d, layers: d.layers.map((l) => (l.id === id ? recipe(l) : l)) }),
-      coalesce,
-    )
+/**
+ * The raw reorderable stack — the implementation view, Advanced only. The
+ * friendly editing surfaces live in the type panels and the Accents section;
+ * this is where reorder, duplicate, delete, and the + Shading / + Accents
+ * additive acts live.
+ */
+function StackBlock({ doc, update, onAddPatternLayer, patternOptions }: SidebarProps) {
+  const [patternId, setPatternId] = useState(patternOptions[0]?.id ?? '')
 
   const move = (index: number, delta: number) =>
     update((d) => {
@@ -860,6 +958,8 @@ function LayersSection({
         copy.rings = copy.rings.map((r) => ({ ...r, id: nextId('r') }))
         copy.satellites = copy.satellites.map((s) => ({ ...s, id: nextId('sa') }))
       }
+      // Duplicating a locked layer copies its property locks — a user
+      // duplicating "the good one" wants the lock to travel with it.
       const layers = d.layers.slice()
       layers.splice(index + 1, 0, copy)
       return { ...d, layers }
@@ -867,164 +967,6 @@ function LayersSection({
 
   const remove = (id: string) =>
     update((d) => ({ ...d, layers: d.layers.filter((l) => l.id !== id) }))
-
-  return (
-    <Section
-      num="04"
-      title="Layers"
-      hint={`${doc.layers.length} · painted bottom → top`}
-      open={open.layers}
-      onToggle={() => onToggleSection('layers')}
-      lock={{
-        section: 'patterns',
-        on: doc.locks.patterns,
-        onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, patterns: on } })),
-      }}
-      randomize={{
-        label: 'Randomize the pattern layers only',
-        onRandomize: () => onRandomizeSection('patterns'),
-        disabled: doc.locks.patterns,
-      }}
-    >
-      <div className="layers">
-        {doc.layers.length === 0 && <div className="note" style={{ padding: 10 }}>No layers yet.</div>}
-        {doc.layers.map((layer, i) => {
-          const selected = layer.id === selectedLayerId
-          return (
-            <div key={layer.id} className={`layer${selected ? ' layer--sel' : ''}`}>
-              <div className="layer__row">
-                <button
-                  type="button"
-                  className="layer__mini"
-                  title={layer.visible ? 'Hide layer' : 'Show layer'}
-                  aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
-                  onClick={() => patch(layer.id, (l) => ({ ...l, visible: !l.visible }))}
-                >
-                  {layer.visible ? '●' : '○'}
-                </button>
-                <span className="layer__kind">{LAYER_KIND_LABEL[layer.kind]}</span>
-                <button
-                  type="button"
-                  className="layer__name"
-                  onClick={() => onSelectLayer(selected ? null : layer.id)}
-                  title="Edit layer"
-                >
-                  {layer.name}
-                </button>
-                <button
-                  type="button"
-                  className="layer__mini"
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0}
-                  title="Move down the stack"
-                  aria-label="Move layer down the stack"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  className="layer__mini"
-                  onClick={() => move(i, 1)}
-                  disabled={i === doc.layers.length - 1}
-                  title="Move up the stack"
-                  aria-label="Move layer up the stack"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="layer__mini"
-                  onClick={() => duplicate(i)}
-                  title="Duplicate layer"
-                  aria-label="Duplicate layer"
-                >
-                  ⧉
-                </button>
-                <button
-                  type="button"
-                  className="layer__mini"
-                  onClick={() => remove(layer.id)}
-                  title="Delete layer"
-                  aria-label="Delete layer"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {selected && (
-                <div className="layer__body">
-                  <TextField
-                    label="Layer name"
-                    value={layer.name}
-                    mono={false}
-                    onCommit={(name) => patch(layer.id, (l) => ({ ...l, name }))}
-                  />
-                  {layer.kind === 'pattern' && (
-                    <PatternLayerEditor
-                      layer={layer}
-                      palette={palette}
-                      parsed={parsedById.get(layer.patternId)}
-                      patternOptions={patternOptions}
-                      onSetPattern={(patternId) => onSetLayerPattern(layer.id, patternId)}
-                      onPatch={(recipe, coalesce) =>
-                        patch(layer.id, (l) => recipe(l as PatternLayer), coalesce)
-                      }
-                    />
-                  )}
-                  {layer.kind === 'shading' && (
-                    <>
-                      {doc.flat && <div className="note">Flat mode — shading suppressed.</div>}
-                      <Inert disabled={doc.flat}>
-                        <ShadingControls
-                          layer={layer}
-                          palette={palette}
-                          onPatch={(recipe, coalesce) =>
-                            patch(layer.id, (l) => recipe(l as ShadingLayer), coalesce)
-                          }
-                        />
-                      </Inert>
-                    </>
-                  )}
-                  {layer.kind === 'accent' && (
-                    <AccentControls
-                      layer={layer}
-                      palette={palette}
-                      suppressRim={doc.flat}
-                      onPatch={(recipe, coalesce) =>
-                        patch(layer.id, (l) => recipe(l as AccentLayer), coalesce)
-                      }
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      <AddLayerRow
-        doc={doc}
-        update={update}
-        onAddPatternLayer={onAddPatternLayer}
-        patternOptions={patternOptions}
-      />
-    </Section>
-  )
-}
-
-function AddLayerRow({
-  doc,
-  update,
-  onAddPatternLayer,
-  patternOptions,
-}: {
-  doc: OrbDoc
-  update: SidebarProps['update']
-  onAddPatternLayer: (patternId: string) => void
-  patternOptions: SidebarProps['patternOptions']
-}) {
-  const [patternId, setPatternId] = useState(patternOptions[0]?.id ?? '')
-  const patternCount = doc.layers.filter((l) => l.kind === 'pattern').length
 
   const addShading = () =>
     update((d) => ({
@@ -1076,7 +1018,7 @@ function AddLayerRow({
           ],
           satellites: [],
           rim: {
-            enabled: true,
+            enabled: false,
             angle: 315,
             width: 0.045,
             spread: 0.55,
@@ -1090,6 +1032,45 @@ function AddLayerRow({
 
   return (
     <>
+      <hr className="divider" />
+      <div className="eyebrow">Stack · painted bottom → top</div>
+      <div className="layers">
+        {doc.layers.map((layer, i) => (
+          <div key={layer.id} className="layer">
+            <div className="layer__row">
+              <button
+                type="button"
+                className="layer__mini"
+                title={layer.visible ? 'Hide layer' : 'Show layer'}
+                onClick={() =>
+                  update((d) => ({
+                    ...d,
+                    layers: d.layers.map((l) =>
+                      l.id === layer.id ? { ...l, visible: !l.visible } : l,
+                    ),
+                  }))
+                }
+              >
+                {layer.visible ? '●' : '○'}
+              </button>
+              <span className="layer__kind">{LAYER_KIND_LABEL[layer.kind]}</span>
+              <span className="layer__name">{layer.name}</span>
+              <button type="button" className="layer__mini" onClick={() => move(i, -1)} disabled={i === 0} title="Move down the stack">
+                ↓
+              </button>
+              <button type="button" className="layer__mini" onClick={() => move(i, 1)} disabled={i === doc.layers.length - 1} title="Move up the stack">
+                ↑
+              </button>
+              <button type="button" className="layer__mini" onClick={() => duplicate(i)} title="Duplicate layer">
+                ⧉
+              </button>
+              <button type="button" className="layer__mini" onClick={() => remove(layer.id)} title="Delete layer">
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
       <Field label="Add pattern layer">
         <div className="field__row">
           <select
@@ -1104,11 +1085,7 @@ function AddLayerRow({
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => patternId && onAddPatternLayer(patternId)}
-          >
+          <button type="button" className="btn" onClick={() => patternId && onAddPatternLayer(patternId)}>
             Add
           </button>
         </div>
@@ -1121,155 +1098,15 @@ function AddLayerRow({
           + Accents
         </button>
       </div>
-
-      <hr className="divider" />
-      <Check
-        label={`Lock pattern layer count (${patternCount})`}
-        checked={doc.lockPatternCount}
-        onChange={(lockPatternCount) => update((d) => ({ ...d, lockPatternCount }))}
-      />
       <div className="note">
-        Remix keeps this many pattern layers but still re-rolls what each one is — a way to stay
-        at one texture without giving up randomization inside it. The section LOCK freezes the
-        layers outright instead.
-      </div>
-      <div className="note">
-        Drop <strong>.svg</strong> files anywhere to add your own patterns — they run through the
-        same fill extraction and palette-slot mapping as the built-ins, and become available to
-        Remix. They are kept between reloads unless they are too large to store.
-      </div>
-      <div className="note">
-        {doc.layers.length} layer{doc.layers.length === 1 ? '' : 's'}. Pattern layers are clipped to
-        the orb circle; accents are not, so moving one below the patterns puts a ring behind the
-        orb.
+        Pattern layers are clipped to the orb circle; accents are not, so moving one below the
+        patterns puts a ring behind the orb.
       </div>
     </>
   )
 }
 
-function PatternLayerEditor({
-  layer,
-  palette,
-  parsed,
-  patternOptions,
-  onSetPattern,
-  onPatch,
-}: {
-  layer: PatternLayer
-  palette: Palette
-  parsed: ParsedPattern | undefined
-  patternOptions: SidebarProps['patternOptions']
-  onSetPattern: (patternId: string) => void
-  onPatch: (recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) => void
-}) {
-  return (
-    <>
-      <Select
-        label="Pattern"
-        value={layer.patternId}
-        options={patternOptions.map((p) => ({
-          value: p.id,
-          label: p.imported ? `${p.name} (imported)` : p.name,
-        }))}
-        onChange={onSetPattern}
-      />
-      <Segmented
-        label="Fit"
-        value={layer.fit}
-        options={[
-          { value: 'tile', label: 'tile' },
-          { value: 'cover', label: 'cover' },
-        ]}
-        onChange={(fit) => onPatch((l) => ({ ...l, fit }))}
-      />
-      <Slider
-        label="Scale"
-        value={layer.scale}
-        min={0.05}
-        max={4}
-        onChange={(scale) => onPatch((l) => ({ ...l, scale }), `pat-s-${layer.id}`)}
-      />
-      <Slider
-        label="Rotation"
-        value={layer.rotation}
-        min={-180}
-        max={180}
-        step={1}
-        suffix="°"
-        onChange={(rotation) => onPatch((l) => ({ ...l, rotation }), `pat-rot-${layer.id}`)}
-      />
-      <div className="grid2">
-        <Slider
-          label="Offset X"
-          value={layer.offsetX}
-          min={-1}
-          max={1}
-          onChange={(offsetX) => onPatch((l) => ({ ...l, offsetX }), `pat-ox-${layer.id}`)}
-        />
-        <Slider
-          label="Offset Y"
-          value={layer.offsetY}
-          min={-1}
-          max={1}
-          onChange={(offsetY) => onPatch((l) => ({ ...l, offsetY }), `pat-oy-${layer.id}`)}
-        />
-      </div>
-      <Slider
-        label="Opacity"
-        value={layer.opacity}
-        min={0}
-        max={1}
-        onChange={(opacity) => onPatch((l) => ({ ...l, opacity }), `pat-op-${layer.id}`)}
-      />
-      <Select
-        label="Blend mode"
-        value={layer.blend}
-        options={BLEND_OPTIONS}
-        onChange={(blend) => onPatch((l) => ({ ...l, blend }))}
-      />
-      <hr className="divider" />
-      <div className="eyebrow">Overlap region</div>
-      <MaskControls
-        mask={layer.mask ?? DEFAULT_LAYER_MASK}
-        onPatch={(patch, coalesce) =>
-          onPatch(
-            (l) => ({ ...l, mask: { ...(l.mask ?? DEFAULT_LAYER_MASK), ...patch } }),
-            coalesce,
-          )
-        }
-      />
-      <hr className="divider" />
-      <div className="eyebrow">Pattern colors</div>
-      {!parsed && <div className="note">Loading pattern…</div>}
-      {parsed?.groups.map((group) => (
-        <ColorRefEditor
-          key={group.index}
-          name={group.label}
-          chip={group.sample}
-          value={layer.colors[group.index] ?? { slot: 0, alpha: group.isBackground ? 0 : 1 }}
-          palette={palette}
-          onChange={(color) =>
-            onPatch((l) => {
-              const colors = l.colors.slice()
-              while (colors.length <= group.index) colors.push({ slot: 0, alpha: 1 })
-              colors[group.index] = color
-              return { ...l, colors }
-            })
-          }
-        />
-      ))}
-      {parsed && (
-        <div className="note">
-          {parsed.groups.length} color group{parsed.groups.length === 1 ? '' : 's'} extracted from{' '}
-          {parsed.tokenColors.length} source color{parsed.tokenColors.length === 1 ? '' : 's'} · tile{' '}
-          {Math.round(parsed.width)}×{Math.round(parsed.height)}
-        </div>
-      )}
-    </>
-  )
-}
-
-/* ---------- 05: shading ---------- */
+/* ---------- shading controls (single home) ---------- */
 
 function ShadingControls({
   layer,
@@ -1359,68 +1196,7 @@ function ShadingControls({
   )
 }
 
-function ShadingSection({
-  doc,
-  palette,
-  open,
-  onToggleSection,
-  update,
-  onRandomizeSection,
-}: SidebarProps) {
-  const layer = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-  const patch = (recipe: (l: ShadingLayer) => ShadingLayer, coalesce?: string) => {
-    if (!layer) return
-    update(
-      (d) => ({
-        ...d,
-        layers: d.layers.map((l) => (l.id === layer.id ? recipe(l as ShadingLayer) : l)),
-      }),
-      coalesce,
-    )
-  }
-
-  return (
-    <Section
-      num="05"
-      title="Shading"
-      // Flat mode reads in the collapsed header too, so the section does not
-      // look merely switched off when something else is overriding it.
-      hint={doc.flat ? 'flat' : layer ? (layer.visible ? 'on' : 'hidden') : 'none'}
-      open={open.shading}
-      onToggle={() => onToggleSection('shading')}
-      lock={{
-        section: 'shading',
-        on: doc.locks.shading,
-        onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, shading: on } })),
-      }}
-      randomize={{
-        label: 'Randomize the shading only',
-        onRandomize: () => onRandomizeSection('shading'),
-        disabled: doc.locks.shading,
-      }}
-    >
-      {!layer ? (
-        <div className="note">
-          No shading layer in the stack. Add one from Layers → + Shading.
-        </div>
-      ) : (
-        <>
-          {doc.flat && <div className="note">Flat mode — shading suppressed.</div>}
-          <Inert disabled={doc.flat}>
-            <Check
-              label="Visible"
-              checked={layer.visible}
-              onChange={(visible) => patch((l) => ({ ...l, visible }))}
-            />
-            <ShadingControls layer={layer} palette={palette} onPatch={patch} />
-          </Inert>
-        </>
-      )}
-    </Section>
-  )
-}
-
-/* ---------- 06: accents ---------- */
+/* ---------- 03 Accents ---------- */
 
 function AccentControls({
   layer,
@@ -1475,42 +1251,6 @@ function AccentControls({
             onChange={(radius) => patchRing(ring.id, { radius }, `ring-r-${ring.id}`)}
           />
           <Slider
-            label="Tilt"
-            value={ring.tilt}
-            min={0.02}
-            max={1}
-            onChange={(tilt) => patchRing(ring.id, { tilt }, `ring-t-${ring.id}`)}
-          />
-          <Slider
-            label="Ellipse rotation"
-            value={ring.rotation}
-            min={-90}
-            max={90}
-            step={1}
-            suffix="°"
-            onChange={(rotation) => patchRing(ring.id, { rotation }, `ring-rot-${ring.id}`)}
-          />
-          <div className="grid2">
-            <Slider
-              label="Arc start"
-              value={ring.start}
-              min={0}
-              max={360}
-              step={1}
-              suffix="°"
-              onChange={(start) => patchRing(ring.id, { start }, `ring-st-${ring.id}`)}
-            />
-            <Slider
-              label="Arc sweep"
-              value={ring.sweep}
-              min={-359}
-              max={359}
-              step={1}
-              suffix="°"
-              onChange={(sweep) => patchRing(ring.id, { sweep }, `ring-sw-${ring.id}`)}
-            />
-          </div>
-          <Slider
             label="Stroke width"
             value={ring.width}
             min={0.2}
@@ -1519,22 +1259,6 @@ function AccentControls({
             decimals={1}
             onChange={(width) => patchRing(ring.id, { width }, `ring-w-${ring.id}`)}
           />
-          <Slider
-            label="Dash"
-            value={ring.dash}
-            min={0}
-            max={60}
-            step={0.5}
-            decimals={1}
-            onChange={(dash) => patchRing(ring.id, { dash }, `ring-d-${ring.id}`)}
-          />
-          <Slider
-            label="Opacity"
-            value={ring.opacity}
-            min={0}
-            max={1}
-            onChange={(opacity) => patchRing(ring.id, { opacity }, `ring-o-${ring.id}`)}
-          />
           <ColorRefEditor
             name="Ring color"
             value={ring.color}
@@ -1542,6 +1266,60 @@ function AccentControls({
             showAlpha={false}
             onChange={(color) => patchRing(ring.id, { color })}
           />
+          <Adv>
+            <Slider
+              label="Tilt"
+              value={ring.tilt}
+              min={0.02}
+              max={1}
+              onChange={(tilt) => patchRing(ring.id, { tilt }, `ring-t-${ring.id}`)}
+            />
+            <Slider
+              label="Ellipse rotation"
+              value={ring.rotation}
+              min={-90}
+              max={90}
+              step={1}
+              suffix="°"
+              onChange={(rotation) => patchRing(ring.id, { rotation }, `ring-rot-${ring.id}`)}
+            />
+            <div className="grid2">
+              <Slider
+                label="Arc start"
+                value={ring.start}
+                min={0}
+                max={360}
+                step={1}
+                suffix="°"
+                onChange={(start) => patchRing(ring.id, { start }, `ring-st-${ring.id}`)}
+              />
+              <Slider
+                label="Arc sweep"
+                value={ring.sweep}
+                min={-359}
+                max={359}
+                step={1}
+                suffix="°"
+                onChange={(sweep) => patchRing(ring.id, { sweep }, `ring-sw-${ring.id}`)}
+              />
+            </div>
+            <Slider
+              label="Dash"
+              value={ring.dash}
+              min={0}
+              max={60}
+              step={0.5}
+              decimals={1}
+              onChange={(dash) => patchRing(ring.id, { dash }, `ring-d-${ring.id}`)}
+            />
+            <Slider
+              label="Opacity"
+              value={ring.opacity}
+              min={0}
+              max={1}
+              onChange={(opacity) => patchRing(ring.id, { opacity }, `ring-o-${ring.id}`)}
+            />
+          </Adv>
         </div>
       ))}
       <button
@@ -1587,46 +1365,21 @@ function AccentControls({
               remove
             </button>
           </div>
-          <div className="grid2">
-            <Slider
-              label="Angle"
-              value={sat.angle}
-              min={0}
-              max={360}
-              step={1}
-              suffix="°"
-              onChange={(angle) => patchSat(sat.id, { angle }, `sat-a-${sat.id}`)}
-            />
-            <Slider
-              label="Distance"
-              value={sat.distance}
-              min={0}
-              max={3}
-              onChange={(distance) => patchSat(sat.id, { distance }, `sat-d-${sat.id}`)}
-            />
-          </div>
+          <Slider
+            label="Angle"
+            value={sat.angle}
+            min={0}
+            max={360}
+            step={1}
+            suffix="°"
+            onChange={(angle) => patchSat(sat.id, { angle }, `sat-a-${sat.id}`)}
+          />
           <Slider
             label="Size"
             value={sat.size}
             min={0.005}
             max={0.5}
             onChange={(size) => patchSat(sat.id, { size }, `sat-s-${sat.id}`)}
-          />
-          <Slider
-            label="Ring stroke (0 = filled)"
-            value={sat.strokeWidth}
-            min={0}
-            max={20}
-            step={0.5}
-            decimals={1}
-            onChange={(strokeWidth) => patchSat(sat.id, { strokeWidth }, `sat-sw-${sat.id}`)}
-          />
-          <Slider
-            label="Opacity"
-            value={sat.opacity}
-            min={0}
-            max={1}
-            onChange={(opacity) => patchSat(sat.id, { opacity }, `sat-o-${sat.id}`)}
           />
           <ColorRefEditor
             name="Satellite color"
@@ -1635,6 +1388,31 @@ function AccentControls({
             showAlpha={false}
             onChange={(color) => patchSat(sat.id, { color })}
           />
+          <Adv>
+            <Slider
+              label="Distance"
+              value={sat.distance}
+              min={0}
+              max={3}
+              onChange={(distance) => patchSat(sat.id, { distance }, `sat-d-${sat.id}`)}
+            />
+            <Slider
+              label="Ring stroke (0 = filled)"
+              value={sat.strokeWidth}
+              min={0}
+              max={20}
+              step={0.5}
+              decimals={1}
+              onChange={(strokeWidth) => patchSat(sat.id, { strokeWidth }, `sat-sw-${sat.id}`)}
+            />
+            <Slider
+              label="Opacity"
+              value={sat.opacity}
+              min={0}
+              max={1}
+              onChange={(opacity) => patchSat(sat.id, { opacity }, `sat-o-${sat.id}`)}
+          />
+          </Adv>
         </div>
       ))}
       <button
@@ -1661,79 +1439,75 @@ function AccentControls({
         + Satellite
       </button>
 
-      <hr className="divider" />
-      <div className="eyebrow">Crescent rim light</div>
-      {/* Only the rim goes inert under flat mode — rings and satellites above are
-          graphic, not depth cues, and stay editable. */}
-      {suppressRim && <div className="note">Flat mode — rim light suppressed.</div>}
-      <Inert disabled={suppressRim}>
-        <Check
-          label="Enabled"
-          checked={layer.rim.enabled}
-          onChange={(enabled) => onPatch((l) => ({ ...l, rim: { ...l.rim, enabled } }))}
-        />
-        {layer.rim.enabled && (
-          <>
-            <Slider
-              label="Angle"
-              value={layer.rim.angle}
-              min={0}
-              max={360}
-              step={1}
-              suffix="°"
-              onChange={(angle) => onPatch((l) => ({ ...l, rim: { ...l.rim, angle } }), `rim-a-${layer.id}`)}
-            />
-            <Slider
-              label="Thickness"
-              value={layer.rim.width}
-              min={0.002}
-              max={0.4}
-              step={0.002}
-              decimals={3}
-              onChange={(width) => onPatch((l) => ({ ...l, rim: { ...l.rim, width } }), `rim-w-${layer.id}`)}
-            />
-            <Slider
-              label="Falloff"
-              value={layer.rim.spread}
-              min={0.05}
-              max={2}
-              onChange={(spread) => onPatch((l) => ({ ...l, rim: { ...l.rim, spread } }), `rim-s-${layer.id}`)}
-            />
-            <Slider
-              label="Opacity"
-              value={layer.rim.opacity}
-              min={0}
-              max={1}
-              onChange={(opacity) => onPatch((l) => ({ ...l, rim: { ...l.rim, opacity } }), `rim-o-${layer.id}`)}
-            />
-            <Select
-              label="Blend mode"
-              value={layer.rim.blend}
-              options={BLEND_OPTIONS}
-              onChange={(blend: BlendMode) => onPatch((l) => ({ ...l, rim: { ...l.rim, blend } }))}
-            />
-            <ColorRefEditor
-              name="Rim color"
-              value={layer.rim.color}
-              palette={palette}
-              showAlpha={false}
-              onChange={(color) => onPatch((l) => ({ ...l, rim: { ...l.rim, color } }))}
-            />
-          </>
-        )}
-      </Inert>
+      <Adv>
+        <hr className="divider" />
+        <div className="eyebrow">Crescent rim light</div>
+        {/* Only the rim goes inert under flat mode — rings and satellites above are
+            graphic, not depth cues, and stay editable. */}
+        {suppressRim && <div className="note">Flat mode — rim light suppressed.</div>}
+        <Inert disabled={suppressRim}>
+          <Check
+            label="Enabled"
+            checked={layer.rim.enabled}
+            onChange={(enabled) => onPatch((l) => ({ ...l, rim: { ...l.rim, enabled } }))}
+          />
+          {layer.rim.enabled && (
+            <>
+              <Slider
+                label="Angle"
+                value={layer.rim.angle}
+                min={0}
+                max={360}
+                step={1}
+                suffix="°"
+                onChange={(angle) => onPatch((l) => ({ ...l, rim: { ...l.rim, angle } }), `rim-a-${layer.id}`)}
+              />
+              <Slider
+                label="Thickness"
+                value={layer.rim.width}
+                min={0.002}
+                max={0.4}
+                step={0.002}
+                decimals={3}
+                onChange={(width) => onPatch((l) => ({ ...l, rim: { ...l.rim, width } }), `rim-w-${layer.id}`)}
+              />
+              <Slider
+                label="Falloff"
+                value={layer.rim.spread}
+                min={0.05}
+                max={2}
+                onChange={(spread) => onPatch((l) => ({ ...l, rim: { ...l.rim, spread } }), `rim-s-${layer.id}`)}
+              />
+              <Slider
+                label="Opacity"
+                value={layer.rim.opacity}
+                min={0}
+                max={1}
+                onChange={(opacity) => onPatch((l) => ({ ...l, rim: { ...l.rim, opacity } }), `rim-o-${layer.id}`)}
+              />
+              <Select
+                label="Blend mode"
+                value={layer.rim.blend}
+                options={BLEND_OPTIONS}
+                onChange={(blend: BlendMode) => onPatch((l) => ({ ...l, rim: { ...l.rim, blend } }))}
+              />
+              <ColorRefEditor
+                name="Rim color"
+                value={layer.rim.color}
+                palette={palette}
+                showAlpha={false}
+                onChange={(color) => onPatch((l) => ({ ...l, rim: { ...l.rim, color } }))}
+              />
+            </>
+          )}
+        </Inert>
+      </Adv>
     </>
   )
 }
 
-function AccentsSection({
-  doc,
-  palette,
-  open,
-  onToggleSection,
-  update,
-  onRandomizeSection,
-}: SidebarProps) {
+function AccentsSection(props: SidebarProps) {
+  const { doc, palette, open, onToggleSection, update, onRandomizeSection } = props
   const layer = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
   const patch = (recipe: (l: AccentLayer) => AccentLayer, coalesce?: string) => {
     if (!layer) return
@@ -1746,9 +1520,25 @@ function AccentsSection({
     )
   }
 
+  // A friendly view of stack position: "behind" = below the first pattern
+  // layer (a ring behind the orb's texture), "in front" = top of the stack.
+  const accentIdx = doc.layers.findIndex((l) => l.kind === 'accent')
+  const firstPatternIdx = doc.layers.findIndex((l) => l.kind === 'pattern')
+  const behind = accentIdx >= 0 && firstPatternIdx >= 0 && accentIdx < firstPatternIdx
+  const setBehind = (toBehind: boolean) =>
+    update((d) => {
+      const at = d.layers.findIndex((l) => l.kind === 'accent')
+      if (at < 0) return d
+      const layers = d.layers.slice()
+      const [moved] = layers.splice(at, 1)
+      if (toBehind) layers.unshift(moved)
+      else layers.push(moved)
+      return { ...d, layers }
+    })
+
   return (
     <Section
-      num="06"
+      num="03"
       title="Accents"
       hint={layer ? `${layer.rings.length}R ${layer.satellites.length}S` : 'none'}
       open={open.accents}
@@ -1765,13 +1555,259 @@ function AccentsSection({
       }}
     >
       {!layer ? (
-        <div className="note">No accent layer in the stack. Add one from Layers → + Accents.</div>
+        <div className="note">
+          No accent layer yet. Add one from Orb → Stack (Advanced) → + Accents.
+        </div>
       ) : (
         <>
           <Check label="Visible" checked={layer.visible} onChange={(visible) => patch((l) => ({ ...l, visible }))} />
+          <Segmented
+            label="Placement"
+            value={behind ? 'behind' : 'front'}
+            options={[
+              { value: 'behind', label: 'behind orb' },
+              { value: 'front', label: 'in front' },
+            ]}
+            onChange={(v) => setBehind(v === 'behind')}
+          />
           <AccentControls layer={layer} palette={palette} onPatch={patch} suppressRim={doc.flat} />
         </>
       )}
     </Section>
+  )
+}
+
+/* ---------- 04 Canvas ---------- */
+
+type BgQuick = 'black' | 'white' | 'transparent' | 'custom'
+
+function bgQuickOf(doc: OrbDoc): BgQuick {
+  const bg = doc.background
+  if (bg.kind === 'transparent') return 'transparent'
+  if (bg.kind === 'solid') {
+    const hex = (bg.color.hex ?? '').toLowerCase()
+    if (hex === '#000000') return 'black'
+    if (hex === '#ffffff') return 'white'
+  }
+  return 'custom'
+}
+
+function CanvasSection(props: SidebarProps) {
+  const { doc, palette, open, onToggleSection, update, onRandomizeSection } = props
+  const quick = bgQuickOf(doc)
+  const bgLabel =
+    quick === 'custom' ? doc.background.kind : quick === 'transparent' ? 'transp.' : quick
+
+  const setQuick = (v: BgQuick) => {
+    if (v === 'custom') {
+      // Reveal the editor without changing what renders.
+      update((d) =>
+        d.background.kind === 'transparent'
+          ? { ...d, background: { ...d.background, kind: 'solid', color: { ...d.background.color, hex: null } } }
+          : { ...d, background: { ...d.background, color: { ...d.background.color, hex: null } } },
+      )
+      return
+    }
+    update((d) => ({
+      ...d,
+      background:
+        v === 'transparent'
+          ? { ...d.background, kind: 'transparent' }
+          : {
+              ...d.background,
+              kind: 'solid',
+              // The quick chips write literal hex overrides — the existing
+              // per-element override mechanism, no new model.
+              color: { ...d.background.color, hex: v === 'black' ? '#000000' : '#ffffff' },
+            },
+    }))
+  }
+
+  return (
+    <Section
+      num="04"
+      title="Canvas"
+      hint={`${doc.canvas.width}×${doc.canvas.height} · ${bgLabel}`}
+      open={open.canvas}
+      onToggle={() => onToggleSection('canvas')}
+      lock={{
+        section: 'background',
+        on: doc.locks.background,
+        onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, background: on } })),
+      }}
+      randomize={{
+        label: 'Randomize the background only',
+        onRandomize: () => onRandomizeSection('background'),
+        disabled: doc.locks.background,
+      }}
+    >
+      <Segmented
+        label="Background"
+        value={quick}
+        options={[
+          { value: 'black', label: 'black' },
+          { value: 'white', label: 'white' },
+          { value: 'transparent', label: 'transp.' },
+          { value: 'custom', label: 'custom…' },
+        ]}
+        onChange={setQuick}
+      />
+      {quick === 'custom' && (
+        <>
+          <Segmented
+            label="Fill"
+            value={doc.background.kind}
+            options={[
+              { value: 'solid', label: 'solid' },
+              { value: 'gradient', label: 'gradient' },
+            ]}
+            onChange={(kind) => update((d) => ({ ...d, background: { ...d.background, kind } }))}
+          />
+          {doc.background.kind === 'solid' && (
+            <ColorRefEditor
+              name="Background color"
+              value={doc.background.color}
+              palette={palette}
+              onChange={(color) => update((d) => ({ ...d, background: { ...d.background, color } }))}
+            />
+          )}
+          {doc.background.kind === 'gradient' && (
+            <GradientEditor
+              gradient={doc.background.gradient}
+              palette={palette}
+              onChange={(gradient, coalesce) =>
+                update((d) => ({ ...d, background: { ...d.background, gradient } }), coalesce)
+              }
+            />
+          )}
+        </>
+      )}
+      <Adv>
+        <Slider
+          label="Vignette"
+          value={doc.background.vignette}
+          min={0}
+          max={1}
+          onChange={(vignette) =>
+            update((d) => ({ ...d, background: { ...d.background, vignette } }), 'bg-vig')
+          }
+        />
+      </Adv>
+      <hr className="divider" />
+      <Segmented
+        label="Aspect"
+        value={
+          ASPECTS.find((a) => a.w === doc.canvas.width && a.h === doc.canvas.height)?.label ??
+          'custom'
+        }
+        options={[...ASPECTS.map((a) => ({ value: a.label, label: a.label })), { value: 'custom', label: 'custom' }]}
+        onChange={(label) => {
+          const a = ASPECTS.find((x) => x.label === label)
+          if (a) update((d) => ({ ...d, canvas: { width: a.w, height: a.h } }))
+        }}
+      />
+      <Adv>
+        <div className="grid2">
+          <NumberField
+            label="Width px"
+            value={doc.canvas.width}
+            min={64}
+            max={8192}
+            onChange={(width) => update((d) => ({ ...d, canvas: { ...d.canvas, width } }))}
+          />
+          <NumberField
+            label="Height px"
+            value={doc.canvas.height}
+            min={64}
+            max={8192}
+            onChange={(height) => update((d) => ({ ...d, canvas: { ...d.canvas, height } }))}
+          />
+        </div>
+      </Adv>
+      <button
+        type="button"
+        className="btn btn--block"
+        onClick={() =>
+          update((d) => ({ ...d, canvas: { width: d.canvas.height, height: d.canvas.width } }))
+        }
+      >
+        Swap orientation
+      </button>
+    </Section>
+  )
+}
+
+/* ---------- the sidebar ---------- */
+
+export function Sidebar(props: SidebarProps) {
+  const { doc, palette, open, onToggleSection, update } = props
+
+  return (
+    <TierContext.Provider value={props.tier}>
+      <aside className="sidebar">
+        {/* Sticky and always visible, so "there is more" stays discoverable.
+            Simple is the remix loop; Advanced is everything. */}
+        <div className="tierbar">
+          <Segmented
+            value={props.tier}
+            options={[
+              { value: 'simple', label: 'Simple' },
+              { value: 'advanced', label: 'Advanced' },
+            ]}
+            onChange={props.onTierChange}
+          />
+        </div>
+
+        {/* 01 — Orb */}
+        <OrbSection {...props} />
+
+        {/* 02 — Palette */}
+        <Section
+          num="02"
+          title="Palette"
+          hint={palette.name}
+          open={open.palette}
+          onToggle={() => onToggleSection('palette')}
+          lock={{
+            section: 'colors',
+            on: doc.locks.colors,
+            onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, colors: on } })),
+          }}
+          randomize={{
+            label: 'Switch to a random palette',
+            onRandomize: props.onRandomizePalette,
+            disabled: doc.locks.colors,
+          }}
+        >
+          <Check
+            label="Keep palette on Remix All"
+            checked={doc.subLocks.colors.palette}
+            onChange={(palette) =>
+              update((d) => ({
+                ...d,
+                subLocks: { ...d.subLocks, colors: { ...d.subLocks.colors, palette } },
+              }))
+            }
+          />
+          <PalettePanel palette={palette} {...props.palettePanel} />
+        </Section>
+
+        {/* 03 — Accents */}
+        <AccentsSection {...props} />
+
+        {/* 04 — Canvas */}
+        <CanvasSection {...props} />
+
+        {/* 05 — Export */}
+        <Section
+          num="05"
+          title="Export"
+          open={open.export}
+          onToggle={() => onToggleSection('export')}
+        >
+          <ExportPanel {...props.exportPanel} />
+        </Section>
+      </aside>
+    </TierContext.Provider>
   )
 }

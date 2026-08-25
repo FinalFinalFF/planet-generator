@@ -1,10 +1,33 @@
 /** Small, uniform control primitives. Every continuous value gets both a
- *  slider and a numeric input, per the brief. */
+ *  slider and a numeric input, per the brief — in both tiers, deliberately:
+ *  typed exact values are how a brand team matches spec across a series, and
+ *  dropping the numeric in Simple would make the tiers lay out differently. */
 
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react'
 import { clamp, normalizeHex } from '../lib/color'
 import { refAlpha, resolveColor } from '../lib/palettes'
 import type { ColorRef, Palette } from '../types'
+
+/* ---------- the Simple / Advanced tier ---------- */
+
+export type Tier = 'simple' | 'advanced'
+
+/**
+ * One global tier, not per-section: depth need is a property of the person and
+ * session, not of a section. Mode-dependence hides what is *irrelevant*; this
+ * hides what is *deep*. Defaulting to `advanced` here is deliberate — anything
+ * rendered outside the provider (tests, stray composition) shows everything
+ * rather than silently hiding controls.
+ */
+export const TierContext = createContext<Tier>('advanced')
+
+export const useTier = (): Tier => useContext(TierContext)
+
+/** Renders its children in the Advanced tier only. Interleave in place —
+ *  advanced controls belong where their siblings are, not in a ghetto. */
+export function Adv({ children }: { children: ReactNode }) {
+  return useTier() === 'advanced' ? <>{children}</> : null
+}
 
 export function Field({
   label,
@@ -317,6 +340,12 @@ export function ColorRefEditor({
   showAlpha?: boolean
   onChange: (next: ColorRef) => void
 }) {
+  // The one primitive-level tier rule that simplifies ~20 call sites at once:
+  // Simple shows name + slot strip only; the hex override and alpha are the
+  // expert path, which also protects the slot indirection the color system is
+  // built on. An active override still shows in Simple ("hex" in the header),
+  // so hidden state that changes pixels is never invisible.
+  const advanced = useTier() === 'advanced'
   const resolved = resolveColor(value, palette)
   const alpha = refAlpha(value)
   const overridden = !!value.hex
@@ -333,38 +362,40 @@ export function ColorRefEditor({
         slot={overridden ? -1 : value.slot}
         onPick={(slot) => onChange({ ...value, slot, hex: null })}
       />
-      <div className="field__row">
-        <input
-          type="color"
-          className="stop__chip"
-          value={resolved}
-          aria-label={`${name} hex override`}
-          onChange={(e) => onChange({ ...value, hex: e.target.value })}
-        />
-        <input
-          className="text"
-          type="text"
-          value={value.hex ?? ''}
-          placeholder={`${resolved} (from palette)`}
-          aria-label={`${name} hex value`}
-          onChange={(e) => {
-            const raw = e.target.value.trim()
-            if (raw === '') return onChange({ ...value, hex: null })
-            const hex = normalizeHex(raw)
-            onChange({ ...value, hex: hex ?? raw })
-          }}
-        />
-        {overridden && (
-          <button
-            type="button"
-            className="btn btn--tiny"
-            onClick={() => onChange({ ...value, hex: null })}
-          >
-            clear
-          </button>
-        )}
-      </div>
-      {showAlpha && (
+      {advanced && (
+        <div className="field__row">
+          <input
+            type="color"
+            className="stop__chip"
+            value={resolved}
+            aria-label={`${name} hex override`}
+            onChange={(e) => onChange({ ...value, hex: e.target.value })}
+          />
+          <input
+            className="text"
+            type="text"
+            value={value.hex ?? ''}
+            placeholder={`${resolved} (from palette)`}
+            aria-label={`${name} hex value`}
+            onChange={(e) => {
+              const raw = e.target.value.trim()
+              if (raw === '') return onChange({ ...value, hex: null })
+              const hex = normalizeHex(raw)
+              onChange({ ...value, hex: hex ?? raw })
+            }}
+          />
+          {overridden && (
+            <button
+              type="button"
+              className="btn btn--tiny"
+              onClick={() => onChange({ ...value, hex: null })}
+            >
+              clear
+            </button>
+          )}
+        </div>
+      )}
+      {advanced && showAlpha && (
         <Slider
           label="Alpha"
           value={alpha}

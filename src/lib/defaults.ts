@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SUBLOCKS,
   DOC_VERSION,
   type AccentLayer,
   type BlendMode,
@@ -12,10 +13,10 @@ import {
   type PatternLayer,
   type Orb,
   type OrbDoc,
-  type OrbStyle,
+  type OrbType,
   type SectorConfig,
   type ShadingLayer,
-  type SliceConfig,
+  type SubLocks,
 } from '../types'
 import { BUILTIN_PALETTES } from './palettes'
 import type { ParsedPattern } from './patterns/parse'
@@ -54,21 +55,6 @@ export const DEFAULT_LAYER_MASK: LayerMask = {
   cy: -0.18,
   radius: 0.85,
   feather: 0,
-}
-
-export const DEFAULT_SLICES: SliceConfig = {
-  count: 20,
-  families: 2,
-  curvature: 1.5,
-  arc: 1,
-  alpha: 1,
-  modulation: 0.42,
-  // Focus off to the left, so the ramp's first stop lands on the left limb.
-  angle: 274,
-  fan: 44,
-  phase: 0.12,
-  // Multiply keeps the base hues; screen washes the whole disc toward white.
-  blend: 'multiply',
 }
 
 /**
@@ -287,6 +273,10 @@ export function defaultDoc(seed: string): OrbDoc {
     seed,
     canvas: { width: 1600, height: 1600 },
     paletteId: BUILTIN_PALETTES[0].id,
+    // Two pattern layers ship visible, so the default document is the
+    // `pattern` type by its own definition.
+    orbType: 'pattern',
+    colorSource: 'palette',
     background: {
       kind: 'gradient',
       color: { slot: 0 },
@@ -301,11 +291,9 @@ export function defaultDoc(seed: string): OrbDoc {
     },
     orb: {
       visible: true,
-      mode: 'disc',
       cx: 0.5,
       cy: 0.5,
       radius: 0.62,
-      slices: { ...DEFAULT_SLICES },
       sectors: cloneSectors(DEFAULT_SECTORS),
       // The ember→cream→teal ramp from the reference, read left to right.
       // Linear rather than conic on purpose: a conic's convergence point
@@ -327,7 +315,6 @@ export function defaultDoc(seed: string): OrbDoc {
       stroke: { enabled: false, width: 2, color: { slot: 7 }, opacity: 0.4 },
     },
     layers,
-    lockPatternCount: false,
     flat: false,
     solidFills: false,
     locks: {
@@ -338,6 +325,7 @@ export function defaultDoc(seed: string): OrbDoc {
       accents: false,
       background: false,
     },
+    subLocks: structuredClone(DEFAULT_SUBLOCKS),
   }
 }
 
@@ -346,19 +334,34 @@ export const DEFAULT_PATTERN_IDS = [DEFAULT_PATTERN_A, DEFAULT_PATTERN_B]
 /* ---------- migration ---------- */
 
 /**
- * The v2 shape, before "planet" was renamed to "orb" throughout. Presets store
- * whole documents and the working document is persisted, so these field names
- * are still sitting in real users' localStorage and have to keep loading.
+ * The pre-v4 shape: `planet` (v2 and earlier) or `orb` with a `mode` of
+ * disc/sliced/sectors and a `slices` config, plus `lockPatternCount` at the
+ * doc level. Presets store whole documents and the working document is
+ * persisted, so these field names are still sitting in real users'
+ * localStorage and have to keep loading.
  */
-type LegacyDoc = Omit<OrbDoc, 'orb' | 'locks'> & {
-  orb?: Orb
-  planet?: Orb
+type LegacyOrb = Orb & {
+  mode?: 'disc' | 'sliced' | 'sectors'
+  slices?: unknown
+}
+type LegacyDoc = Omit<OrbDoc, 'orb' | 'locks' | 'orbType' | 'subLocks' | 'colorSource'> & {
+  orb?: LegacyOrb
+  planet?: LegacyOrb
+  orbType?: OrbType
+  subLocks?: Partial<SubLocks>
+  colorSource?: OrbDoc['colorSource']
+  lockPatternCount?: boolean
   locks: Partial<Record<LockSection | 'planet', boolean>>
 }
 
 /**
  * Fill in anything a document saved by an older version is missing. Presets
  * store whole documents, so a v1 preset has to keep loading.
+ *
+ * v4 is the one migration that *changes a document's look*: `sliced` is
+ * retired, so a sliced document comes back as a `color` disc wearing the same
+ * gradient its slice ramp sampled. Deliberate (2026-08-25 decision), and
+ * called out in the release note rather than silently absorbed.
  */
 export function normalizeDoc(input: OrbDoc): OrbDoc {
   // v2 and earlier called this `planet`. Renaming the field rather than aliasing
@@ -367,12 +370,6 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
   const base = doc.orb ?? doc.planet
   if (!base) throw new Error('document has neither `orb` nor legacy `planet`')
 
-  const orb = {
-    ...base,
-    mode: base.mode ?? 'disc',
-    slices: { ...DEFAULT_SLICES, ...(base.slices ?? {}) },
-    sectors: { ...cloneSectors(DEFAULT_SECTORS), ...(base.sectors ?? {}) },
-  }
   const layers = doc.layers.map((layer) =>
     layer.kind === 'pattern'
       ? {
@@ -389,207 +386,95 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
       : layer,
   )
 
+  // v4: the type is derived from what the document *is*. Sliced retires to
+  // `color` (the gradient survives; the lattice does not).
+  const orbType: OrbType =
+    doc.orbType ??
+    (base.mode === 'sectors'
+      ? 'segments'
+      : base.mode === 'sliced'
+        ? 'color' // sliced retires; the gradient survives, the lattice does not
+        : layers.some((l) => l.kind === 'pattern' && l.visible)
+          ? 'pattern'
+          : 'color')
+
+  const orb: Orb = {
+    visible: base.visible ?? true,
+    cx: base.cx,
+    cy: base.cy,
+    radius: base.radius,
+    gradient: base.gradient,
+    sectors: { ...cloneSectors(DEFAULT_SECTORS), ...(base.sectors ?? {}) },
+    stroke: base.stroke,
+  }
+
+  // Structural merge, so a sub-lock added later defaults cleanly too.
+  const subLocks: SubLocks = {
+    orb: { ...DEFAULT_SUBLOCKS.orb, ...(doc.subLocks?.orb ?? {}) },
+    patterns: { ...DEFAULT_SUBLOCKS.patterns, ...(doc.subLocks?.patterns ?? {}) },
+    colors: { ...DEFAULT_SUBLOCKS.colors, ...(doc.subLocks?.colors ?? {}) },
+  }
+  // Absorb the legacy field, then delete it so the two never coexist.
+  if (typeof doc.lockPatternCount === 'boolean') {
+    subLocks.patterns.count ||= doc.lockPatternCount
+  }
+
   const { planet: legacyPlanetLock, ...locks } = doc.locks ?? {}
   const out = {
     ...doc,
     version: DOC_VERSION,
+    orbType,
     orb,
     layers,
     locks: { ...locks, orb: locks.orb ?? legacyPlanetLock ?? false } as Locks,
-    lockPatternCount: doc.lockPatternCount ?? false,
+    subLocks,
+    colorSource: doc.colorSource ?? 'palette',
     flat: doc.flat ?? false,
     solidFills: doc.solidFills ?? false,
   }
   delete (out as { planet?: unknown }).planet
+  delete (out as { lockPatternCount?: unknown }).lockPatternCount
   return out as OrbDoc
 }
 
-/* ---------- orb style recipes ---------- */
+/* ---------- orb type switching ---------- */
 
 /**
- * Each style rewrites the orb mode, the shading, and the layer stack
- * together — the reference looks are combinations of all three, not one setting.
- * Palette, canvas, seed, locks and pattern choices are left alone.
- */
-/**
- * What a style wants to do, before locks get a say. Split out from the
- * application so each style stays readable as a recipe while the lock gating
- * lives in exactly one place.
- */
-type StylePlan = {
-  orb: (prev: Orb) => Orb
-  pattern: (prev: PatternLayer, index: number) => PatternLayer
-  shading: Partial<ShadingLayer>
-  accentsVisible: boolean
-}
-
-function planFor(style: OrbStyle): StylePlan {
-  switch (style) {
-    case 'flat-disc':
-      // The plain gradient circles of the reference: no shading at all, so the
-      // disc stays graphic rather than photographic.
-      return {
-        orb: (p) => ({ ...p, mode: 'disc' }),
-        pattern: (p) => ({ ...p, visible: false }),
-        shading: { visible: false },
-        accentsVisible: false,
-      }
-
-    case 'shaded-sphere':
-      return {
-        orb: (p) => ({ ...p, mode: 'disc' }),
-        pattern: (p) => ({ ...p, visible: false }),
-        shading: {
-          visible: true,
-          shadow: 0.86,
-          highlight: 0.36,
-          lightDistance: 0.5,
-          highlightSize: 0.7,
-          contactShadow: 0.58,
-          opacity: 1,
-          blend: 'normal',
-        },
-        accentsVisible: true,
-      }
-
-    case 'patterned-disc':
-      // Crisp ink across the whole disc. v2: no shading at all — the pattern
-      // and the gradient carry it, matching the image 40 reference discs.
-      return {
-        orb: (p) => ({ ...p, mode: 'disc' }),
-        pattern: (p, i) => ({
-          ...p,
-          visible: true,
-          blend: (i === 0 ? 'normal' : p.blend) as BlendMode,
-          opacity: i === 0 ? 0.72 : p.opacity,
-          mask: { ...p.mask, mode: 'orb' as const },
-        }),
-        shading: { visible: false },
-        accentsVisible: true,
-      }
-
-    case 'overlap-bloom':
-      // Soft pattern-in-circle overlap: each pattern gets its own feathered
-      // lens so textures meet in lens-shaped patches instead of covering
-      // the whole disc.
-      return {
-        orb: (p) => ({ ...p, mode: 'disc' }),
-        pattern: (p, i) => ({
-          ...p,
-          visible: true,
-          blend: (i % 2 === 0 ? 'multiply' : 'screen') as BlendMode,
-          opacity: 0.5,
-          mask: {
-            mode: (i % 2 === 0 ? 'lens' : 'outside-lens') as MaskMode,
-            cx: i % 2 === 0 ? 0.3 : -0.26,
-            cy: i % 2 === 0 ? 0.26 : -0.22,
-            radius: 0.9,
-            feather: 0.55,
-          },
-        }),
-        // v2: the lens overlaps carry the depth; no rendered lighting.
-        shading: { visible: false },
-        accentsVisible: true,
-      }
-
-    case 'sliced-sweep':
-      // Patterns and the terminator both fight the slice lattice, so the
-      // slices carry the whole orb and only the accents stay.
-      return {
-        orb: (p) => ({ ...p, mode: 'sliced', slices: { ...DEFAULT_SLICES, ...p.slices } }),
-        pattern: (p) => ({ ...p, visible: false }),
-        shading: { visible: false },
-        accentsVisible: true,
-      }
-
-    case 'sector-collage':
-      // The abstract direction: the collage carries the whole orb, so every
-      // 3D cue goes — no shading, no accents, no pattern layers on top. The
-      // existing sector config is kept (like sliced-sweep keeps slice
-      // settings); remix is what deals new cells. Deliberately does not touch
-      // `doc.flat` — that is a standing user constraint, never a style's.
-      return {
-        orb: (p) => ({ ...p, mode: 'sectors' }),
-        pattern: (p) => ({ ...p, visible: false }),
-        shading: { visible: false },
-        accentsVisible: false,
-      }
-  }
-}
-
-export type OrbStyleResult = {
-  doc: OrbDoc
-  /** Sections a lock kept the style from touching, for the caller to report. */
-  skipped: LockSection[]
-}
-
-/**
- * Apply a composition style, **respecting the locks**. A lock is absolute
- * (CLAUDE.md), and that has to hold for macros too — not just Remix.
+ * Switch the orb type — the engine behind the Type segmented control.
  *
- * Layers are mapped in place rather than rebuilt, so the existing stack order
- * survives. That matters for a locked accent layer sitting *below* the patterns,
- * which the old rebuild silently restacked, and it also stops a duplicated
- * shading or accent layer being dropped.
+ * Rewrites `orbType` and pattern-layer *visibility* together (a Color or
+ * Segments orb hides its pattern layers; a Pattern orb shows the first two),
+ * and touches nothing else: shading and accents are orthogonal to type
+ * (2026-08-25 decision — accents have nothing to do with orb type), palette,
+ * geometry, seed and locks are left alone, and hidden layers keep their data
+ * so switching back restores them.
+ *
+ * **Locks are absolute here too**: `locks.orb` or the `orb.type` sub-lock
+ * blocks the type change; `locks.patterns` blocks the visibility rewrite.
+ * Skipped work is reported so the UI can say so.
  */
-export function applyOrbStyle(doc: OrbDoc, style: OrbStyle): OrbStyleResult {
-  const plan = planFor(style)
-  const { locks } = doc
-
-  const hasPattern = doc.layers.some((l) => l.kind === 'pattern')
-  const hasShading = doc.layers.some((l) => l.kind === 'shading')
-  const hasAccent = doc.layers.some((l) => l.kind === 'accent')
-
-  const skipped: LockSection[] = []
-  if (locks.orb) skipped.push('orb')
-  if (locks.patterns && hasPattern) skipped.push('patterns')
-  if (locks.shading) skipped.push('shading')
-  if (locks.accents && hasAccent) skipped.push('accents')
-
-  let patternIndex = 0
-  const layers: Layer[] = doc.layers.map((layer) => {
-    if (layer.kind === 'pattern') {
-      const i = patternIndex++
-      return locks.patterns ? layer : plan.pattern(layer, i)
-    }
-    if (layer.kind === 'shading') {
-      return locks.shading ? layer : { ...layer, ...plan.shading }
-    }
-    return locks.accents ? layer : { ...layer, visible: plan.accentsVisible }
-  })
-
-  // Every style specifies shading, so a document without one gets it created —
-  // placed above the patterns and below any accents, matching where the styles
-  // have always put it.
-  if (!hasShading && !locks.shading) {
-    const firstAccent = layers.findIndex((l) => l.kind === 'accent')
-    const made = makeShadingLayer(plan.shading)
-    if (firstAccent >= 0) layers.splice(firstAccent, 0, made)
-    else layers.push(made)
-  }
-
-  return {
-    doc: { ...doc, orb: locks.orb ? doc.orb : plan.orb(doc.orb), layers },
-    skipped,
-  }
+export type OrbTypeResult = {
+  doc: OrbDoc
+  /** What a lock kept the switch from touching, for the caller to report. */
+  skipped: ('orb' | 'patterns')[]
 }
 
-/** Best-effort read of which style the current document resembles. */
-export function detectOrbStyle(doc: OrbDoc): OrbStyle | 'custom' {
-  if (doc.orb.mode === 'sectors') return 'sector-collage'
-  if (doc.orb.mode === 'sliced') return 'sliced-sweep'
-  const patterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern' && l.visible)
-  const shading = doc.layers.find((l): l is ShadingLayer => l.kind === 'shading')
-  // Flat mode suppresses shading at render time, so a document that only differs
-  // from `shaded-sphere` by that suppression must not claim to be one. The
-  // detector reports what is on screen, and under flat there is no shading there.
-  const shaded = !doc.flat && !!shading?.visible
-  if (patterns.length === 0) return shaded ? 'shaded-sphere' : 'flat-disc'
-  // Only call it overlap-bloom when every visible pattern is lens-confined;
-  // a mix of full-disc ink and one lens patch is its own thing.
-  if (patterns.every((p) => p.mask?.mode !== 'orb' && (p.mask?.feather ?? 0) > 0.2)) {
-    return 'overlap-bloom'
+export function applyOrbType(doc: OrbDoc, type: OrbType): OrbTypeResult {
+  const typeLocked = doc.locks.orb || doc.subLocks.orb.type
+  const skipped: OrbTypeResult['skipped'] = []
+  if (typeLocked) skipped.push('orb')
+  const nextType = typeLocked ? doc.orbType : type
+
+  let layers = doc.layers
+  const hasPattern = doc.layers.some((l) => l.kind === 'pattern')
+  if (doc.locks.patterns) {
+    if (hasPattern) skipped.push('patterns')
+  } else {
+    let i = 0
+    layers = doc.layers.map((l) =>
+      l.kind === 'pattern' ? { ...l, visible: nextType === 'pattern' && i++ < 2 } : l,
+    )
   }
-  if (patterns.every((p) => (p.mask?.mode ?? 'orb') === 'orb')) return 'patterned-disc'
-  return 'custom'
+
+  return { doc: { ...doc, orbType: nextType, layers }, skipped }
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { GRADIENT_TYPES, type Gradient, type GradientType, type Palette } from '../types'
-import { ColorRefEditor, Segmented, Slider } from './controls'
+import { Adv, ColorRefEditor, Segmented, Slider, useTier } from './controls'
 import { resolveColor } from '../lib/palettes'
 import { nextId } from '../lib/defaults'
 
@@ -15,6 +15,10 @@ export function GradientEditor({
   palette: Palette
   onChange: (next: Gradient, coalesce?: string) => void
 }) {
+  // Tier split: type + angle + stop chips + the selected stop's slot color are
+  // the reacting surface; per-stop position, add/remove, center, spread and
+  // sweep segments are the deep editing surface.
+  const advanced = useTier() === 'advanced'
   const [selected, setSelected] = useState(0)
   const stops = g.stops
   const sel = Math.min(selected, Math.max(0, stops.length - 1))
@@ -61,7 +65,7 @@ export function GradientEditor({
         />
       )}
 
-      {(g.type === 'radial' || g.type === 'conic') && (
+      {advanced && (g.type === 'radial' || g.type === 'conic') && (
         <div className="grid2">
           <Slider
             label="Center X"
@@ -80,7 +84,7 @@ export function GradientEditor({
         </div>
       )}
 
-      {g.type === 'radial' && (
+      {advanced && g.type === 'radial' && (
         <Slider
           label="Spread"
           value={g.radius}
@@ -90,7 +94,7 @@ export function GradientEditor({
         />
       )}
 
-      {g.type === 'conic' && (
+      {advanced && g.type === 'conic' && (
         <Slider
           label="Sweep segments"
           value={g.segments}
@@ -121,29 +125,35 @@ export function GradientEditor({
               onClick={() => setSelected(i)}
             />
           ))}
-          <button type="button" className="btn btn--tiny" onClick={addStop}>
-            +
-          </button>
-          <button
-            type="button"
-            className="btn btn--tiny"
-            onClick={removeStop}
-            disabled={stops.length <= 2}
-          >
-            −
-          </button>
+          {advanced && (
+            <>
+              <button type="button" className="btn btn--tiny" onClick={addStop}>
+                +
+              </button>
+              <button
+                type="button"
+                className="btn btn--tiny"
+                onClick={removeStop}
+                disabled={stops.length <= 2}
+              >
+                −
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {stop && (
         <>
-          <Slider
-            label="Position"
-            value={stop.offset}
-            min={0}
-            max={1}
-            onChange={(offset) => patchStop({ offset }, `stop-off-${stop.id}`)}
-          />
+          <Adv>
+            <Slider
+              label="Position"
+              value={stop.offset}
+              min={0}
+              max={1}
+              onChange={(offset) => patchStop({ offset }, `stop-off-${stop.id}`)}
+            />
+          </Adv>
           <ColorRefEditor
             name={`Stop ${sel + 1} color`}
             value={stop.color}

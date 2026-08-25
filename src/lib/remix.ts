@@ -1,21 +1,26 @@
 /**
  * Seeded remix. Same seed + same palette + same locks ⇒ same output.
  *
- * **Draws always.** Every section's candidate is computed unconditionally and in
- * a fixed order; the locks are then applied as a pure selection between the
- * candidate and the incoming value. A locked section still runs its draws and
- * throws the result away, so toggling one lock never shifts what an unrelated
- * unlocked section produces for the same seed.
+ * **Fixed-width candidates.** Every candidate is drawn unconditionally, in a
+ * fixed order, and at its *maximum* width: all `MAX_PATTERN_LAYERS` pattern
+ * layers, all `MAX_SECTOR_CELLS` cells per row, every count rolled whether or
+ * not it is used. Locks — section locks, sub-locks, and per-object property
+ * locks — are then applied purely as a selection between candidate values and
+ * incoming values, consuming zero draws. The invariant is strict: the number
+ * of draws depends on the seed and on doc/deps state (does a shading layer
+ * exist, are any patterns parsed), never on any lock at any level.
  *
- * When adding to this function, never branch on a lock in a way that changes how
- * many values are drawn — compute both, then choose. The draw count may depend
- * on doc state (how many layers exist, `lockPatternCount`) and on earlier draws;
- * it must not depend on `doc.locks`.
+ * When adding to this function, never branch on a lock in a way that changes
+ * how many values are drawn — compute both, then choose.
  *
- * **A lock is absolute.** Nothing in this module writes to a locked section:
+ * **A lock is absolute.** Nothing in this module writes to a locked value:
  * not Remix, not Remix All, not Shuffle colors, not a per-section randomize.
- * Every entry point guards on `doc.locks`, so a locked section cannot be
- * changed by accident from a caller that forgot to check.
+ * Every entry point guards on the locks, so a locked value cannot be changed
+ * by accident from a caller that forgot to check. Property locks inherit the
+ * same doctrine, plus **existence implication**: a lock on a child implies the
+ * lock that guarantees the child's existence — any locked cell pins the sector
+ * structure, any locked layer pins the pattern-layer count. Implications are
+ * derived here, never stored, so no bookkeeping can drift.
  */
 
 import {
@@ -23,9 +28,8 @@ import {
   type Background,
   type LayerMask,
   type Orb,
-  type OrbMode,
+  type OrbType,
   type SectorFill,
-  type SliceConfig,
   type BlendMode,
   type ColorRef,
   type Gradient,
@@ -39,14 +43,39 @@ import {
   type ShadingLayer,
 } from '../types'
 import { makeRng, type Rng } from './rng'
-import { DEFAULT_LAYER_MASK, DEFAULT_SLICES, nextId } from './defaults'
+import { DEFAULT_LAYER_MASK, nextId } from './defaults'
 import type { ParsedPattern } from './patterns/parse'
 import { slotsByLightness } from './palettes'
+import { PICKABLE_BRAND_GRADIENTS, brandGradientFor } from './brand'
 
 export type RemixDeps = {
   /** Patterns that are parsed and therefore safe to reference. */
   available: ParsedPattern[]
   palette: Palette
+}
+
+/** The fixed candidate widths. Selection uses a prefix; draws always run full. */
+export const MAX_PATTERN_LAYERS = 3
+export const MAX_SECTOR_CELLS = 3
+
+/* ---------- lock helpers ---------- */
+
+const hasAnyLock = (obj: { locks?: Partial<Record<string, boolean>> } | undefined): boolean =>
+  !!obj?.locks && Object.values(obj.locks).some(Boolean)
+
+/** Existence implication: any locked cell pins the whole sector structure. */
+export function structureLockedFor(doc: OrbDoc): boolean {
+  return (
+    doc.locks.orb ||
+    doc.subLocks.orb.structure ||
+    [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB].some(hasAnyLock)
+  )
+}
+
+/** Existence implication: any locked layer pins the pattern-layer count. */
+export function patternCountLockedFor(doc: OrbDoc): boolean {
+  const prevPatterns = doc.layers.filter((l): l is PatternLayer => l.kind === 'pattern')
+  return doc.locks.patterns || doc.subLocks.patterns.count || prevPatterns.some(hasAnyLock)
 }
 
 /* ---------- color dealing ---------- */
@@ -142,6 +171,27 @@ function remixGradient(rng: Rng, palette: Palette, prev: Gradient, lockColors: b
   }
 }
 
+/**
+ * Select between the slot-ramp candidate and a named brand gradient — the
+ * `colorSource` standing preference made operational. The brand pick is a
+ * unit float drawn unconditionally at every gradient site (count-independent,
+ * so growing the brand set never shifts the stream); this function consumes
+ * no draws. Colors-locked documents keep their incoming stops either way —
+ * the colors lock outranks the color source.
+ */
+function selectGradient(
+  candidate: Gradient,
+  brandPick: number,
+  doc: OrbDoc,
+  palette: Palette,
+  lockColors: boolean,
+): Gradient {
+  if (lockColors || doc.colorSource !== 'gradients') return candidate
+  const pool = PICKABLE_BRAND_GRADIENTS
+  const brand = pool[Math.min(pool.length - 1, Math.floor(brandPick * pool.length))]
+  return brandGradientFor(brand, palette, candidate)
+}
+
 /* ---------- layers ---------- */
 
 const OVERLAY_BLENDS: BlendMode[] = ['normal', 'multiply', 'screen', 'soft-light', 'overlay']
@@ -231,6 +281,43 @@ function remixPatternLayer(
   }
 }
 
+/**
+ * Per-property selection between a fully-drawn candidate and the incoming
+ * layer — the property-lock tier. Consumes no draws. The layer's identity
+ * (id, its own locks) always survives; each guarded property keeps the
+ * incoming value, everything else takes the candidate's.
+ */
+function selectLayer(
+  cand: PatternLayer,
+  prev: PatternLayer | undefined,
+  deps: RemixDeps,
+): PatternLayer {
+  if (!prev) return cand
+  const k = prev.locks ?? {}
+  const pat = k.pattern ? prev : cand
+  const parsed = deps.available.find((p) => p.id === pat.patternId)
+  // Colors drawn for the candidate's pattern cycle onto the selected pattern's
+  // group count — same rule the colors lock has always used.
+  const fitColors = (refs: ColorRef[]): ColorRef[] =>
+    parsed
+      ? parsed.groups.map(
+          (g, i) => refs[i] ?? refs[refs.length - 1] ?? { slot: 0, alpha: g.isBackground ? 0 : 1 },
+        )
+      : refs
+  return {
+    ...cand,
+    id: prev.id,
+    patternId: pat.patternId,
+    name: pat.name,
+    colors: k.color ? fitColors(prev.colors) : fitColors(cand.colors),
+    scale: k.scale ? prev.scale : cand.scale,
+    offsetX: k.position ? prev.offsetX : cand.offsetX,
+    offsetY: k.position ? prev.offsetY : cand.offsetY,
+    rotation: k.rotation ? prev.rotation : cand.rotation,
+    locks: prev.locks,
+  }
+}
+
 function remixShading(rng: Rng, palette: Palette, prev: ShadingLayer, lockColors: boolean): ShadingLayer {
   const deck = buildDeck(palette)
   return {
@@ -302,11 +389,66 @@ function remixAccents(rng: Rng, palette: Palette, prev: AccentLayer, lockColors:
   }
 }
 
+/* ---------- sector cells ---------- */
+
+/** Every ColorRef a fill carries, in a stable order. */
+function refsOf(fill: SectorFill): ColorRef[] {
+  if (fill.kind === 'flat') return [fill.color]
+  if (fill.kind === 'ramp') return [fill.from, fill.to]
+  return fill.colors
+}
+
+/** The same fill wearing a different set of refs, cycled to its width. */
+function withRefs(fill: SectorFill, refs: ColorRef[]): SectorFill {
+  if (refs.length === 0) return fill
+  const at = (i: number) => refs[i % refs.length]
+  if (fill.kind === 'flat') return { ...fill, color: at(0) }
+  if (fill.kind === 'ramp') return { ...fill, from: at(0), to: at(1) }
+  return { ...fill, colors: fill.colors.map((_, i) => at(i)) }
+}
+
+/**
+ * Per-property selection for one segment cell. `fill` is the cell's identity
+ * (kind + pattern); `color` its inks; `scale`/`rotation` its texture geometry
+ * (rotation doubles as the ramp angle — the one authored rotation a ramp has).
+ * Consumes no draws.
+ */
+function selectCell(cand: SectorFill, prev: SectorFill | undefined): SectorFill {
+  if (!prev) return cand
+  const k = prev.locks ?? {}
+  // Identity first: fill locked keeps the incoming kind + pattern wholesale,
+  // then unlocked properties are re-applied from the candidate onto it.
+  const base: SectorFill = k.fill ? structuredClone(prev) : structuredClone(cand)
+
+  let out = base
+  if (k.color) out = withRefs(out, refsOf(prev))
+  else if (k.fill) out = withRefs(out, refsOf(cand))
+
+  if (out.kind === 'texture') {
+    const prevTex = prev.kind === 'texture' ? prev : undefined
+    const candTex = cand.kind === 'texture' ? cand : undefined
+    out = {
+      ...out,
+      scale: k.scale ? (prevTex?.scale ?? out.scale) : (candTex?.scale ?? out.scale),
+      rotation: k.rotation ? (prevTex?.rotation ?? out.rotation) : (candTex?.rotation ?? out.rotation),
+    }
+  } else if (out.kind === 'ramp') {
+    const prevAngle = prev.kind === 'ramp' ? prev.angle : undefined
+    const candAngle = cand.kind === 'ramp' ? cand.angle : undefined
+    out = {
+      ...out,
+      angle: k.rotation ? (prevAngle ?? out.angle) : (candAngle ?? out.angle),
+    }
+  }
+  return { ...out, locks: prev.locks }
+}
+
 /* ---------- entry points ---------- */
 
 /**
  * Pick a palette from the seed. Kept here rather than in the caller so the same
- * seed reproduces the palette choice too, and so the `colors` lock still wins.
+ * seed reproduces the palette choice too, and so the `colors` lock and the
+ * `colors.palette` sub-lock still win (callers guard on both).
  */
 export function pickPalette(palettes: Palette[], seed: string, current: string): Palette {
   if (palettes.length === 0) return { id: current, name: current, colors: ['#000000'] }
@@ -318,7 +460,7 @@ export function pickPalette(palettes: Palette[], seed: string, current: string):
 
 export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const rng = makeRng(seed)
-  const { locks } = doc
+  const { locks, subLocks } = doc
   const palette = deps.palette
   const deck = buildDeck(palette)
 
@@ -327,10 +469,10 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const prevAccents = doc.layers.find((l): l is AccentLayer => l.kind === 'accent')
 
   /*
-   * Every section's candidate is built here, unconditionally and in a fixed
-   * order. Locks are applied afterwards, purely as a selection between the
-   * candidate and the incoming value. Nothing below may branch on a lock in a
-   * way that changes how many draws happen.
+   * DRAW PHASE — everything below is drawn unconditionally, in this order, at
+   * fixed width. No lock is consulted until the select phase. (`locks.colors`
+   * appears inside a few draw helpers, but only ever as a selection over draws
+   * those helpers still make — the pattern the module header describes.)
    */
 
   // --- background candidate ---
@@ -345,46 +487,17 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   ]
   const bgRadius = rng.float(0.7, 1.1)
   const bgVignette = rng.float(0.1, 0.5)
-  const backgroundCandidate: Background = {
-    kind: bgKind,
-    color: locks.colors ? doc.background.color : { slot: deck.dark[0] },
-    gradient: {
-      ...bgGradient,
-      type: bgRadial ? 'radial' : 'linear',
-      stops: locks.colors ? doc.background.gradient.stops : bgStops,
-      radius: bgRadius,
-    },
-    vignette: bgVignette,
-  }
+  const bgBrandPick = rng.float(0, 1)
 
-  // --- orb candidate ---
-  // The abstract direction leads: sector collages draw as often as both
-  // legacy modes combined — the v2 brief's "at least as often as legacy".
-  const orbMode = rng.weighted(
-    ['disc', 'sliced', 'sectors'] as OrbMode[],
-    [0.36, 0.14, 0.5],
+  // --- orb type candidate ---
+  // The collage still leads, per the v2 direction; sliced is retired and is
+  // not dealt at all.
+  const typeCandidate = rng.weighted(
+    ['color', 'pattern', 'segments'] as OrbType[],
+    [0.26, 0.32, 0.42],
   )
-  const sliced = orbMode === 'sliced'
-  const slices: SliceConfig = {
-    ...DEFAULT_SLICES,
-    count: rng.int(9, 26),
-    families: rng.bool(0.75) ? 2 : 1,
-    curvature: rng.float(1.1, 3.2),
-    arc: rng.bool(0.7) ? 1 : rng.float(0.7, 1.35),
-    // The base family stays near-opaque or the crescents stop reading.
-    alpha: rng.float(0.88, 1),
-    modulation: rng.float(0.2, 0.5),
-    angle: rng.int(0, 359),
-    fan: rng.float(26, 74),
-    phase: rng.float(0, 0.4),
-    blend: rng.weighted(
-      ['multiply', 'overlay', 'screen', 'normal'] as BlendMode[],
-      [0.42, 0.28, 0.18, 0.12],
-    ),
-  }
-  // Sector candidate — drawn always, like the slices, so the stream never
-  // depends on which mode was rolled. Cell counts and per-cell kinds are
-  // earlier draws, which the draw count may legitimately depend on.
+
+  // --- sector structure + cell candidates, always full width ---
   const sectorAngleKind = rng.weighted(['h', 'v', 'free'] as const, [0.44, 0.28, 0.28])
   const sectorFreeAngle = rng.int(0, 359)
   const sectorAngle =
@@ -403,6 +516,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     const slotA = rng.pick(flatPool.length > 0 ? flatPool : deck.all)
     const slotB = rng.pick(deck.light)
     const rampAngle = rng.int(0, 359)
+    const brandPick = rng.float(0, 1)
     if (kind === 'texture' && cellPool.length > 0) {
       const parsed = rng.pick(cellPool)
       // Collage cells carry their own ground about half the time — the comps'
@@ -426,61 +540,123 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       }
     }
     if (kind === 'ramp') {
+      // Under the gradients color source a ramp cell wears a named brand
+      // gradient's endpoints instead of the dealt slots. Pure selection over
+      // draws already made; the colors lock re-inks over it later either way.
+      if (doc.colorSource === 'gradients' && !locks.colors) {
+        const pool = PICKABLE_BRAND_GRADIENTS
+        const brand = pool[Math.min(pool.length - 1, Math.floor(brandPick * pool.length))]
+        const first = brand.stops[0]
+        const last = brand.stops[brand.stops.length - 1]
+        return {
+          kind: 'ramp',
+          from: { slot: slotA, hex: first.hex },
+          to: { slot: slotB, hex: last.hex },
+          angle: brand.angle,
+        }
+      }
       return { kind: 'ramp', from: { slot: slotA }, to: { slot: slotB }, angle: rampAngle }
     }
     return { kind: 'flat', color: { slot: slotA } }
   }
-  const rowACount = rng.weighted([1, 2, 3], [0.5, 0.36, 0.14])
-  const rowBCount = rng.weighted([1, 2, 3], [0.34, 0.46, 0.2])
-  let sectorRowA = Array.from({ length: rowACount }, dealFill)
-  let sectorRowB = Array.from({ length: rowBCount }, dealFill)
-  if (locks.colors) {
-    // The colors lock freezes rendered colors: reuse the incoming fills'
-    // ColorRefs over the freshly drawn structure, cycling if it grew. The
-    // draws above still happened — this is pure selection, per the module
-    // header.
-    const prevRefs: ColorRef[] = [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB].flatMap(
-      (f) =>
-        f.kind === 'flat' ? [f.color] : f.kind === 'ramp' ? [f.from, f.to] : f.colors,
-    )
-    if (prevRefs.length > 0) {
-      let i = 0
-      const next = () => prevRefs[i++ % prevRefs.length]
-      const relock = (f: SectorFill): SectorFill =>
-        f.kind === 'flat'
-          ? { ...f, color: next() }
-          : f.kind === 'ramp'
-            ? { ...f, from: next(), to: next() }
-            : { ...f, colors: f.colors.map(() => next()) }
-      sectorRowA = sectorRowA.map(relock)
-      sectorRowB = sectorRowB.map(relock)
-    }
-  }
+  const rowACountRoll = rng.weighted([1, 2, 3], [0.5, 0.36, 0.14])
+  const rowBCountRoll = rng.weighted([1, 2, 3], [0.34, 0.46, 0.2])
+  const rowACands = Array.from({ length: MAX_SECTOR_CELLS }, dealFill)
+  const rowBCands = Array.from({ length: MAX_SECTOR_CELLS }, dealFill)
 
+  // --- orb geometry + fill candidates ---
   const orbCx = rng.float(0.45, 0.55)
   const orbCy = rng.float(0.45, 0.55)
   const orbRadius = rng.float(0.5, 0.74)
   const orbGradient = remixGradient(rng, palette, doc.orb.gradient, locks.colors)
-  // Short-circuits on `sliced`, which is itself a draw — so the stream still
-  // depends only on the seed, never on a lock.
-  const strokeEnabled = !sliced && rng.bool(0.18)
+  const orbBrandPick = rng.float(0, 1)
+  const strokeEnabled = rng.bool(0.18)
   const strokeWidth = rng.float(1, 4)
   const strokeOpacity = rng.float(0.25, 0.7)
+
+  // --- layer candidates, always full width ---
+  const rolledLayerCount = rng.weighted([1, 2, 3], [0.3, 0.45, 0.25])
+  const patternCandidates: PatternLayer[] =
+    deps.available.length === 0
+      ? []
+      : Array.from({ length: MAX_PATTERN_LAYERS }, (_, i) =>
+          remixPatternLayer(rng, deps, prevPatterns[i], locks.colors),
+        )
+
+  // The layer-existence guards stay: a document with no shading layer really
+  // does consume fewer draws, because that is doc state, not lock state.
+  //
+  // Visibility follows the incoming layer: the v2 direction avoids rendered
+  // lighting, so remix never turns shading *on* — a flat document stays flat
+  // through any number of remixes, and shading returns only by explicit choice.
+  const shadingCandidate: ShadingLayer | null = prevShading
+    ? {
+        ...remixShading(rng, palette, prevShading, locks.colors),
+        visible: prevShading.visible,
+      }
+    : null
+
+  // Accents have nothing to do with orb type (2026-08-25 decision): the old
+  // rule that retired them under a sector collage is gone. They remix like any
+  // section unless locked, and their visibility is the user's own state.
+  const accentsCandidate: AccentLayer | null = prevAccents
+    ? { ...remixAccents(rng, palette, prevAccents, locks.colors), visible: prevAccents.visible }
+    : null
+
+  const rolledBelow = rng.bool(0.3)
+
+  /*
+   * SELECT PHASE — pure choices between candidates and incoming values.
+   * Nothing below consumes a draw.
+   */
+
+  const orbType: OrbType = locks.orb || subLocks.orb.type ? doc.orbType : typeCandidate
+
+  // --- sectors: structure, then per-cell property selection ---
+  const structureLocked = structureLockedFor(doc)
+  const prevSec = doc.orb.sectors
+  const selAngle = structureLocked ? prevSec.angle : sectorAngle
+  const selOffset = structureLocked ? prevSec.offset : sectorOffset
+  const rowLen = (prevRow: SectorFill[], rolled: number) =>
+    structureLocked ? prevRow.length : rolled
+  const buildRow = (cands: SectorFill[], prevRow: SectorFill[], rolled: number): SectorFill[] =>
+    Array.from({ length: rowLen(prevRow, rolled) }, (_, i) =>
+      selectCell(cands[i % cands.length], prevRow[i]),
+    )
+  let sectorRowA = buildRow(rowACands, prevSec.rowA, rowACountRoll)
+  let sectorRowB = buildRow(rowBCands, prevSec.rowB, rowBCountRoll)
+  if (locks.colors) {
+    // The colors lock freezes rendered colors: reuse the incoming fills'
+    // ColorRefs over the selected structure, cycling if it grew — then cells
+    // whose own `color` property is locked re-assert their exact refs below.
+    const prevRefs: ColorRef[] = [...prevSec.rowA, ...prevSec.rowB].flatMap(refsOf)
+    if (prevRefs.length > 0) {
+      let i = 0
+      const takeNext = (fill: SectorFill): SectorFill => {
+        const width = refsOf(fill).length
+        const refs = Array.from({ length: width }, () => prevRefs[i++ % prevRefs.length])
+        return withRefs(fill, refs)
+      }
+      const reassert = (fill: SectorFill, prev: SectorFill | undefined): SectorFill =>
+        prev?.locks?.color ? withRefs(fill, refsOf(prev)) : fill
+      sectorRowA = sectorRowA.map((f, j) => reassert(takeNext(f), prevSec.rowA[j]))
+      sectorRowB = sectorRowB.map((f, j) => reassert(takeNext(f), prevSec.rowB[j]))
+    }
+  }
+
   const orbCandidate: Orb = {
     ...doc.orb,
-    visible: true,
-    mode: orbMode,
-    slices,
+    visible: doc.orb.visible,
     sectors: {
-      angle: sectorAngle,
-      offset: sectorOffset,
+      angle: selAngle,
+      offset: selOffset,
       rowA: sectorRowA,
       rowB: sectorRowB,
     },
-    cx: orbCx,
-    cy: orbCy,
-    radius: orbRadius,
-    gradient: orbGradient,
+    cx: subLocks.orb.position ? doc.orb.cx : orbCx,
+    cy: subLocks.orb.position ? doc.orb.cy : orbCy,
+    radius: subLocks.orb.size ? doc.orb.radius : orbRadius,
+    gradient: selectGradient(orbGradient, orbBrandPick, doc, palette, locks.colors),
     stroke: {
       ...doc.orb.stroke,
       enabled: strokeEnabled,
@@ -490,58 +666,45 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     },
   }
 
-  // --- layer candidates ---
-  // `lockPatternCount` freezes how many layers there are without freezing what
-  // they contain. It reads doc state, not lock state, so it may legitimately
-  // change the draw count.
-  const rolledCount = rng.weighted([1, 2, 3], [0.3, 0.45, 0.25])
-  const patternCount =
+  const backgroundCandidate: Background = {
+    kind: bgKind,
+    color: locks.colors ? doc.background.color : { slot: deck.dark[0] },
+    gradient: selectGradient(
+      {
+        ...bgGradient,
+        type: bgRadial ? 'radial' : 'linear',
+        stops: locks.colors ? doc.background.gradient.stops : bgStops,
+        radius: bgRadius,
+      },
+      bgBrandPick,
+      doc,
+      palette,
+      locks.colors,
+    ),
+    vignette: bgVignette,
+  }
+
+  // --- pattern layers: count, then per-layer property selection ---
+  const countLocked = patternCountLockedFor(doc)
+  const layerCount =
     deps.available.length === 0
       ? 0
-      : doc.lockPatternCount
+      : countLocked
         ? prevPatterns.length
-        : rolledCount
-
-  // A slice lattice already carries the whole orb — and so does a sector
-  // collage: heavy texture and a terminator on top of either just read as mud.
-  // Taken from the *selected* orb, so a locked disc orb keeps its textures —
-  // hence the roll below is unconditional while its use is not.
-  const selfCarrying = (mode: OrbMode) => mode === 'sliced' || mode === 'sectors'
-  const busyNow = selfCarrying((locks.orb ? doc.orb : orbCandidate).mode)
-
-  const patternCandidates: PatternLayer[] = Array.from({ length: patternCount }, (_, i) => {
-    const layer = remixPatternLayer(rng, deps, prevPatterns[i], locks.colors)
-    const hideForSlices = rng.bool(0.35)
-    return busyNow ? { ...layer, visible: i === 0 && hideForSlices } : layer
+        : orbType === 'pattern'
+          ? Math.min(2, Math.max(1, rolledLayerCount))
+          : rolledLayerCount
+  const patterns = patternCandidates.slice(0, layerCount).map((cand, i) => {
+    const selected = selectLayer(cand, prevPatterns[i], deps)
+    // A Color or Segments orb carries itself; its pattern layers stay in the
+    // document but render hidden, so switching type back restores them.
+    return { ...selected, visible: orbType === 'pattern' && i < 2 }
   })
 
-  // The layer-existence guards stay: a document with no shading layer really
-  // does consume fewer draws, because that is doc state. Only the lock guards go.
-  //
-  // Visibility follows the incoming layer: the v2 direction avoids rendered
-  // lighting, so remix never turns shading *on* — a flat document stays flat
-  // through any number of remixes, and shading returns only by explicit choice
-  // (the layer toggle or the shaded-sphere style). A document that already has
-  // it visible keeps it, except under a self-carrying orb.
-  const shadingCandidate: ShadingLayer | null = prevShading
-    ? {
-        ...remixShading(rng, palette, prevShading, locks.colors),
-        visible: prevShading.visible && !busyNow,
-      }
-    : null
-
-  // Orbit rings and satellites around a sector collage read as astronomy —
-  // exactly the literalness the collage exists to avoid — so remix retires
-  // them there. Sliced keeps its accents; that mode never drew the complaint.
-  const sectorsNow = (locks.orb ? doc.orb : orbCandidate).mode === 'sectors'
-  const accentsCandidate: AccentLayer | null = prevAccents
-    ? { ...remixAccents(rng, palette, prevAccents, locks.colors), visible: !sectorsNow }
-    : null
-
-  // --- apply the locks ---
+  // --- apply the section locks ---
   const background = locks.background ? doc.background : backgroundCandidate
   const orb = locks.orb ? doc.orb : orbCandidate
-  const patterns = locks.patterns ? prevPatterns : patternCandidates
+  const selectedPatterns = locks.patterns ? prevPatterns : patterns
   const shading = locks.shading ? (prevShading ?? null) : shadingCandidate
   const accents = locks.accents ? (prevAccents ?? null) : accentsCandidate
 
@@ -558,14 +721,12 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
    * The accent above/below roll is still drawn unconditionally, per the RNG
    * invariant; it may only *move* the accent when accents are unlocked.
    */
-  const rolledBelow = rng.bool(0.3)
-
   let patternSlot = 0
   let shadingPlaced = false
   let accentPlaced = false
   // A null marks a pattern slot the new, shorter run no longer fills.
   const substituted: (Layer | null)[] = doc.layers.map((layer) => {
-    if (layer.kind === 'pattern') return patterns[patternSlot++] ?? null
+    if (layer.kind === 'pattern') return selectedPatterns[patternSlot++] ?? null
     if (layer.kind === 'shading') {
       // Only the first shading layer was remixed; any duplicates pass through.
       if (shadingPlaced || !shading) return layer
@@ -580,7 +741,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
 
   // A longer pattern run needs somewhere to put the surplus: straight after the
   // last existing pattern slot, else below the shading layer, else at the end.
-  const surplus = patterns.slice(patternSlot)
+  const surplus = selectedPatterns.slice(patternSlot)
   if (surplus.length > 0) {
     let at = -1
     for (let i = layers.length - 1; i >= 0; i--) {
@@ -607,13 +768,16 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     }
   }
 
-  return { ...doc, seed, background, orb, layers }
+  return { ...doc, seed, orbType, background, orb, layers }
 }
 
 /**
  * Randomize one section and leave everything else alone — the inverse of the
  * locks, implemented by inverting them so there is only one code path deciding
  * what a section's randomization means.
+ *
+ * Sub-locks and per-object property locks pass through **unchanged**: a
+ * sub-lock is absolute even against its own section's dice.
  *
  * `doc.seed` is deliberately left untouched. The header seed reproduces a *full*
  * remix; a partial one is an edit, the same as moving a slider, and claiming
@@ -641,8 +805,9 @@ export function remixSection(
 
 /**
  * Re-deal palette slots without touching a single geometric value.
- * Respects the `colors` lock: a lock is absolute, so this is a no-op while
- * colors are frozen.
+ * Respects the `colors` lock (a no-op while colors are frozen) and every
+ * per-object `color` property lock — those layers and cells keep their refs,
+ * while their pools are still drawn so the stream never depends on a lock.
  */
 export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbDoc {
   if (doc.locks.colors) return doc // the lock wins
@@ -681,14 +846,13 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
             : deck.light
       const shuffled = rng.shuffle(pool.length ? pool : deck.all)
       let i = 0
-      return {
-        ...layer,
-        colors: layer.colors.map((c) =>
-          (c.alpha ?? 1) <= 0.001
-            ? c // a hidden plate stays hidden
-            : { ...c, slot: shuffled[i++ % shuffled.length], hex: null },
-        ),
-      }
+      const dealt = layer.colors.map((c) =>
+        (c.alpha ?? 1) <= 0.001
+          ? c // a hidden plate stays hidden
+          : { ...c, slot: shuffled[i++ % shuffled.length], hex: null },
+      )
+      // Drawn either way; a color-locked layer keeps its refs.
+      return layer.locks?.color ? layer : { ...layer, colors: dealt }
     }
     if (layer.kind === 'shading') {
       return {
@@ -717,26 +881,30 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
   })
 
   // Sector fills are ColorRefs too, so the shuffle has to reach them — an orb
-  // in sectors mode would otherwise look immune to Shuffle colors. Drawn after
+  // in segments mode would otherwise look immune to Shuffle colors. Drawn after
   // every existing draw, so pre-sector documents shuffle exactly as before.
   const sectorPool = rng.shuffle(deck.all)
   let k = 0
   const nextSlot = () => sectorPool[k++ % sectorPool.length]
   const shuffleFill = (f: SectorFill): SectorFill => {
-    if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
-    if (f.kind === 'ramp')
+    const dealt: SectorFill = (() => {
+      if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
+      if (f.kind === 'ramp')
+        return {
+          ...f,
+          from: { ...f.from, slot: nextSlot(), hex: null },
+          to: { ...f.to, slot: nextSlot(), hex: null },
+        }
       return {
         ...f,
-        from: { ...f.from, slot: nextSlot(), hex: null },
-        to: { ...f.to, slot: nextSlot(), hex: null },
+        colors: f.colors.map((c) =>
+          // A hidden plate stays hidden, same as pattern layers.
+          (c.alpha ?? 1) <= 0.001 ? c : { ...c, slot: nextSlot(), hex: null },
+        ),
       }
-    return {
-      ...f,
-      colors: f.colors.map((c) =>
-        // A hidden plate stays hidden, same as pattern layers.
-        (c.alpha ?? 1) <= 0.001 ? c : { ...c, slot: nextSlot(), hex: null },
-      ),
-    }
+    })()
+    // Draws consumed above either way; a color-locked cell keeps its refs.
+    return f.locks?.color ? f : dealt
   }
   const sectors = {
     ...orb.sectors,

@@ -67,6 +67,27 @@ export type LayerMask = {
   feather: number
 }
 
+/**
+ * Per-property locks on an object (a pattern layer or a segment cell). Absent
+ * or false = unlocked. The vocabulary is deliberately short and user-meaningful
+ * ("lock this layer's pattern"), not one flag per field — the object-level and
+ * section-level locks cover the rest.
+ *
+ * Semantics are uniform with every other lock: a property lock freezes the
+ * value against randomizers and macros (remix, dice, shuffle, type switches),
+ * never against the user's own hand, and never the palette indirection.
+ *
+ * **Existence implication** (see `remix.ts`): any property lock on a layer
+ * implies the pattern-layer *count* behaves locked, and any lock on a segment
+ * cell implies the sector *structure* (chord + row counts) behaves locked —
+ * a lock on a child implies the lock that guarantees the child's existence.
+ * Implications are derived at remix time, never stored.
+ */
+export type PropertyLocks<K extends string> = Partial<Record<K, boolean>>
+
+export type LayerPropertyLock = 'pattern' | 'color' | 'scale' | 'position' | 'rotation'
+export type CellPropertyLock = 'fill' | 'color' | 'scale' | 'rotation'
+
 export type PatternLayer = {
   kind: 'pattern'
   id: string
@@ -85,6 +106,7 @@ export type PatternLayer = {
   /** One entry per color group of the referenced pattern. */
   colors: ColorRef[]
   mask: LayerMask
+  locks?: PropertyLocks<LayerPropertyLock>
 }
 
 export type ShadingLayer = {
@@ -163,8 +185,24 @@ export type AccentLayer = {
 export type Layer = PatternLayer | ShadingLayer | AccentLayer
 export type LayerKind = Layer['kind']
 
-export const ORB_MODES = ['disc', 'sliced', 'sectors'] as const
-export type OrbMode = (typeof ORB_MODES)[number]
+/**
+ * The orb's type — the workflow's first choice, and what the editor's panels
+ * key off. `color` is a flat-or-gradient disc; `pattern` is a base fill with
+ * 1–2 pattern layers over it; `segments` is the chord-split collage.
+ *
+ * The old `sliced` render mode is retired (2026-08-25 decision): no type chip,
+ * no remix dealing. `normalizeDoc` migrates sliced documents to `color`,
+ * keeping their gradient — their banded lattice is gone, called out in the
+ * release note.
+ */
+export const ORB_TYPES = ['color', 'pattern', 'segments'] as const
+export type OrbType = (typeof ORB_TYPES)[number]
+
+export const ORB_TYPE_LABELS: Record<OrbType, string> = {
+  color: 'Color',
+  pattern: 'Pattern',
+  segments: 'Segments',
+}
 
 export const SECTOR_FILL_KINDS = ['flat', 'ramp', 'texture'] as const
 export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
@@ -179,9 +217,16 @@ export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
  * per color group of the referenced pattern, exactly like `PatternLayer`.
  */
 export type SectorFill =
-  | { kind: 'flat'; color: ColorRef }
-  | { kind: 'ramp'; from: ColorRef; to: ColorRef; angle: number }
-  | { kind: 'texture'; patternId: string; colors: ColorRef[]; scale: number; rotation: number }
+  | { kind: 'flat'; color: ColorRef; locks?: PropertyLocks<CellPropertyLock> }
+  | { kind: 'ramp'; from: ColorRef; to: ColorRef; angle: number; locks?: PropertyLocks<CellPropertyLock> }
+  | {
+      kind: 'texture'
+      patternId: string
+      colors: ColorRef[]
+      scale: number
+      rotation: number
+      locks?: PropertyLocks<CellPropertyLock>
+    }
 
 /**
  * The sector collage from the 2026-08-25 references: the disc cut by one
@@ -204,61 +249,16 @@ export type SectorConfig = {
   rowB: SectorFill[]
 }
 
-/**
- * The sliced sphere from the reference.
- *
- * A family is a set of concentric circles about a focus sitting *outside* the
- * orb, drawn largest first so each smaller circle paints over the last. What
- * stays visible of each is an annulus, and because the focus is off to one side
- * those annuli read as curved bands sweeping right across the disc. The radii
- * are derived to span the orb exactly, so the bands always reach both limbs.
- *
- * A second family with a focus `fan` degrees away is laid over translucently;
- * its bands cross the first family's and cut them into the flat diamond cells of
- * the reference.
- *
- * Keeping the base family opaque is the whole trick — a uniformly translucent
- * stack just lets the last circle drawn swamp everything underneath it.
- */
-export type SliceConfig = {
-  /** Bands per family. */
-  count: number
-  /** 1 = plain arc bands; 2 = the crossing lattice. */
-  families: 1 | 2
-  /**
-   * Distance from the orb center to a family's focus, in orb radii.
-   * Near 1 the bands curve hard; large values flatten them toward straight
-   * stripes.
-   */
-  curvature: number
-  /** Vertical squash of each band (ry ÷ rx). 1 = circles. */
-  arc: number
-  /** Base-family alpha. 1 gives clean bands; lower values wash them together. */
-  alpha: number
-  /** Second-family alpha — how hard the lattice cuts into the base bands. */
-  modulation: number
-  /** Direction of the base family's focus, degrees clockwise from 12 o'clock. */
-  angle: number
-  /** Angular separation between the two families' foci, in degrees. */
-  fan: number
-  /** Offset applied to the second family's position along the ramp. */
-  phase: number
-  /** How the second family composites onto the base. */
-  blend: BlendMode
-}
-
 export type Orb = {
   visible: boolean
-  mode: OrbMode
   /** Center as a fraction of canvas width/height. */
   cx: number
   cy: number
   /** Radius as a fraction of min(width, height) / 2. */
   radius: number
-  /** Colors for disc and sliced: `sliced` samples this ramp per slice. */
+  /** The disc fill for the `color` type and the base fill under `pattern`. */
   gradient: Gradient
-  slices: SliceConfig
-  /** Sector-collage cells; only rendered when `mode` is `sectors`. */
+  /** Sector-collage cells; only rendered when `doc.orbType` is `segments`. */
   sectors: SectorConfig
   stroke: {
     enabled: boolean
@@ -285,22 +285,57 @@ export const LOCK_SECTIONS = ['colors', 'orb', 'patterns', 'shading', 'accents',
 export type LockSection = (typeof LOCK_SECTIONS)[number]
 export type Locks = Record<LockSection, boolean>
 
+/**
+ * Property-level sub-locks — the middle tier of the lock tree between a
+ * section lock and the per-object `locks` on layers and cells. Each freezes
+ * one user-meaningful property while the rest of its section keeps remixing:
+ *
+ * - `orb.type`      the orb type only; a type locked to `segments` still
+ *                   re-deals its cells.
+ * - `orb.size`      the radius.
+ * - `orb.position`  cx + cy as one unit.
+ * - `orb.structure` segments only: the chord (angle + offset) and both row
+ *                   counts — "this many segments, keep dealing what's inside".
+ * - `patterns.count` how many pattern layers a remix produces (absorbs the
+ *                   old `doc.lockPatternCount`).
+ * - `colors.palette` keep the palette on Remix All, still re-deal assignments.
+ *
+ * A section lock ⊇ its sub-locks: with the section locked the sub-locks are
+ * moot; stored state is independent so toggling the section lock returns you
+ * to exactly the sub-locks you had. Like `Locks`, deliberately shallow and
+ * fully typed so `normalizeDoc` can default it structurally.
+ */
+export type SubLocks = {
+  orb: { type: boolean; size: boolean; position: boolean; structure: boolean }
+  patterns: { count: boolean }
+  colors: { palette: boolean }
+}
+
+export const DEFAULT_SUBLOCKS: SubLocks = {
+  orb: { type: false, size: false, position: false, structure: false },
+  patterns: { count: false },
+  colors: { palette: false },
+}
+
 export type OrbDoc = {
   version: number
   seed: string
   canvas: Canvas
   paletteId: string
   background: Background
+  /** The workflow's first choice; drives the editor panels and remix dealing. */
+  orbType: OrbType
   orb: Orb
   layers: Layer[]
   locks: Locks
+  subLocks: SubLocks
   /**
-   * Freeze how many pattern layers a remix produces, while still letting it
-   * re-roll what each one is. Separate from `locks.patterns`, which freezes the
-   * layers wholesale — this keeps a composition simple (say, one texture) without
-   * giving up randomization inside it.
+   * Where remix gets its color from: `palette` deals slot ramps (the default),
+   * `gradients` selects one of the named RSAC brand gradients instead at every
+   * smooth-gradient site. A standing preference like `flat` — survives remix
+   * via the spread, not a lock, not in `doc.locks`.
    */
-  lockPatternCount: boolean
+  colorSource: 'palette' | 'gradients'
   /**
    * Suppress every cue that reads as a 3D sphere, keeping everything that is
    * genuinely graphic.
@@ -340,31 +375,14 @@ export type Preset = {
   doc: OrbDoc
 }
 
-export const DOC_VERSION = 3
+/**
+ * v4 is the mode-first restructure: `orbType` replaces `orb.mode` (sliced
+ * retired), `subLocks` absorbs `lockPatternCount`, per-object property locks,
+ * and `colorSource`. The old "Orb style" recipes are gone with the dropdown —
+ * shaded-sphere is "Color type + shading on", overlap-bloom is a documented
+ * Pattern-type recipe.
+ */
+export const DOC_VERSION = 4
 
 /** A pattern tile at scale 1 spans this fraction of the orb diameter. */
 export const TILE_BASE_FRACTION = 0.5
-
-/**
- * Named recipes for the "Orb style" dropdown. Each one rewrites the orb
- * mode, the shading, and the layer stack together — the looks in the reference
- * material are combinations, not single settings.
- */
-export const ORB_STYLES = [
-  'flat-disc',
-  'shaded-sphere',
-  'patterned-disc',
-  'overlap-bloom',
-  'sliced-sweep',
-  'sector-collage',
-] as const
-export type OrbStyle = (typeof ORB_STYLES)[number]
-
-export const ORB_STYLE_LABELS: Record<OrbStyle, string> = {
-  'flat-disc': 'Flat disc',
-  'shaded-sphere': 'Shaded sphere',
-  'patterned-disc': 'Patterned disc',
-  'overlap-bloom': 'Overlap bloom',
-  'sliced-sweep': 'Sliced sweep',
-  'sector-collage': 'Sector collage',
-}

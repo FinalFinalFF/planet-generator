@@ -8,10 +8,18 @@
 
 import { describe, expect, it } from 'vitest'
 import { remix, remixSection, shuffleColors } from './remix'
-import { defaultDoc } from './defaults'
+import { applyOrbType, defaultDoc, normalizeDoc } from './defaults'
 import { BUILTIN_PALETTES, paletteById } from './palettes'
 import type { ParsedPattern } from './patterns/parse'
-import type { AccentLayer, Locks, PatternLayer, OrbDoc, ShadingLayer } from '../types'
+import type {
+  AccentLayer,
+  Locks,
+  PatternLayer,
+  OrbDoc,
+  SectorFill,
+  ShadingLayer,
+  SubLocks,
+} from '../types'
 
 /**
  * Layer and gradient-stop ids come from `nextId()`, which is a Date.now() +
@@ -359,5 +367,282 @@ describe('locked sections keep their stack position, not just their contents', (
     for (const seed of ['sh1', 'sh2', 'sh3']) {
       expect(remix(doc, seed, deps).layers[0].kind).toBe('shading')
     }
+  })
+})
+
+/*
+ * The v4 lock tree: sub-locks (orb.type/size/position/structure,
+ * patterns.count, colors.palette) and per-object property locks, all under the
+ * same two contracts as section locks — absoluteness, and lock-independent
+ * draw streams. The fixed-width remix restructure makes the second contract
+ * strict: toggling ANY lock at ANY level leaves every non-locked value
+ * byte-identical for the same seed, with no grandfathered exemptions.
+ */
+
+const withSubLocks = (patch: Partial<{ [K in keyof SubLocks]: Partial<SubLocks[K]> }>): OrbDoc => ({
+  ...FIXTURE,
+  subLocks: {
+    orb: { ...FIXTURE.subLocks.orb, ...(patch.orb ?? {}) },
+    patterns: { ...FIXTURE.subLocks.patterns, ...(patch.patterns ?? {}) },
+    colors: { ...FIXTURE.subLocks.colors, ...(patch.colors ?? {}) },
+  },
+})
+
+const SEEDS = ['t1', 't2', 't3', 't4']
+
+describe('sub-locks are absolute', () => {
+  it('orb.type keeps the incoming type while cells still re-deal', () => {
+    const doc = { ...withSubLocks({ orb: { type: true } }), orbType: 'segments' as const }
+    for (const seed of SEEDS) {
+      const out = remix(doc, seed, deps)
+      expect(out.orbType).toBe('segments')
+    }
+    // The cells are not pinned by a type lock: across seeds they change.
+    const cells = SEEDS.map((s) => json(remix(doc, s, deps).orb.sectors))
+    expect(new Set(cells).size).toBeGreaterThan(1)
+  })
+
+  it('orb.size keeps the radius; orb.position keeps cx+cy', () => {
+    for (const seed of SEEDS) {
+      const size = remix(withSubLocks({ orb: { size: true } }), seed, deps)
+      expect(size.orb.radius).toBe(FIXTURE.orb.radius)
+      const pos = remix(withSubLocks({ orb: { position: true } }), seed, deps)
+      expect(pos.orb.cx).toBe(FIXTURE.orb.cx)
+      expect(pos.orb.cy).toBe(FIXTURE.orb.cy)
+    }
+  })
+
+  it('orb.structure keeps the chord and both row counts, not the cell contents', () => {
+    const doc = withSubLocks({ orb: { structure: true } })
+    const contents = new Set<string>()
+    for (const seed of SEEDS) {
+      const out = remix(doc, seed, deps)
+      expect(out.orb.sectors.angle).toBe(FIXTURE.orb.sectors.angle)
+      expect(out.orb.sectors.offset).toBe(FIXTURE.orb.sectors.offset)
+      expect(out.orb.sectors.rowA.length).toBe(FIXTURE.orb.sectors.rowA.length)
+      expect(out.orb.sectors.rowB.length).toBe(FIXTURE.orb.sectors.rowB.length)
+      contents.add(json(out.orb.sectors.rowA))
+    }
+    expect(contents.size).toBeGreaterThan(1)
+  })
+
+  it('patterns.count keeps the layer count while re-rolling the layers', () => {
+    const doc = withSubLocks({ patterns: { count: true } })
+    for (const seed of SEEDS) {
+      expect(patterns(remix(doc, seed, deps)).length).toBe(patterns(FIXTURE).length)
+    }
+  })
+
+  it('sub-locks hold against the section dice too', () => {
+    const doc = { ...withSubLocks({ orb: { size: true, type: true } }), orbType: 'segments' as const }
+    for (const seed of SEEDS) {
+      const out = remixSection(doc, 'orb', seed, deps)
+      expect(out.orb.radius).toBe(doc.orb.radius)
+      expect(out.orbType).toBe('segments')
+    }
+  })
+})
+
+describe('property locks are absolute and survive remix', () => {
+  const layerLocked: OrbDoc = {
+    ...FIXTURE,
+    layers: FIXTURE.layers.map((l, i) =>
+      l.kind === 'pattern' && i === 0
+        ? { ...l, locks: { pattern: true, scale: true } }
+        : l,
+    ),
+  }
+
+  it('a locked layer property keeps its value; unlocked properties change', () => {
+    const changedRotation = new Set<string>()
+    for (const seed of SEEDS) {
+      const out = patterns(remix(layerLocked, seed, deps))[0]
+      const orig = patterns(layerLocked)[0]
+      expect(out.patternId).toBe(orig.patternId)
+      expect(out.scale).toBe(orig.scale)
+      expect(out.locks).toEqual(orig.locks)
+      changedRotation.add(String(out.rotation))
+    }
+    expect(changedRotation.size).toBeGreaterThan(1)
+  })
+
+  it('any layer lock implies the count behaves locked (existence implication)', () => {
+    for (const seed of SEEDS) {
+      expect(patterns(remix(layerLocked, seed, deps)).length).toBe(
+        patterns(layerLocked).length,
+      )
+    }
+  })
+
+  const cellLocked: OrbDoc = {
+    ...FIXTURE,
+    orbType: 'segments',
+    orb: {
+      ...FIXTURE.orb,
+      sectors: {
+        ...FIXTURE.orb.sectors,
+        rowB: FIXTURE.orb.sectors.rowB.map((f, i) =>
+          i === 0 ? ({ ...f, locks: { fill: true, color: true } } as SectorFill) : f,
+        ),
+      },
+    },
+  }
+
+  it('a locked cell keeps its fill and inks; the structure is pinned by implication', () => {
+    for (const seed of SEEDS) {
+      const out = remix(cellLocked, seed, deps)
+      const cell = out.orb.sectors.rowB[0]
+      expect(json(cell)).toBe(json(cellLocked.orb.sectors.rowB[0]))
+      expect(out.orb.sectors.angle).toBe(cellLocked.orb.sectors.angle)
+      expect(out.orb.sectors.rowA.length).toBe(cellLocked.orb.sectors.rowA.length)
+      expect(out.orb.sectors.rowB.length).toBe(cellLocked.orb.sectors.rowB.length)
+    }
+  })
+
+  it('unlocking the last child releases the implication', () => {
+    const released: OrbDoc = {
+      ...cellLocked,
+      orb: {
+        ...cellLocked.orb,
+        sectors: {
+          ...cellLocked.orb.sectors,
+          rowB: cellLocked.orb.sectors.rowB.map((f) => ({ ...f, locks: undefined })),
+        },
+      },
+    }
+    const counts = new Set<string>()
+    for (const seed of ['r1', 'r2', 'r3', 'r4', 'r5', 'r6']) {
+      const out = remix(released, seed, deps)
+      counts.add(`${out.orb.sectors.rowA.length}/${out.orb.sectors.rowB.length}/${out.orb.sectors.angle}`)
+    }
+    expect(counts.size).toBeGreaterThan(1)
+  })
+
+  it('shuffleColors respects a color-locked layer and cell, and still shuffles the rest', () => {
+    const doc: OrbDoc = {
+      ...cellLocked,
+      layers: cellLocked.layers.map((l, i) =>
+        l.kind === 'pattern' && i === 0 ? { ...l, locks: { color: true } } : l,
+      ),
+    }
+    const out = shuffleColors(doc, palette, 'plock-shuffle')
+    expect(json(patterns(out)[0].colors)).toBe(json(patterns(doc)[0].colors))
+    expect(json(out.orb.sectors.rowB[0])).toBe(json(doc.orb.sectors.rowB[0]))
+    expect(json(out)).not.toBe(json(doc))
+  })
+})
+
+describe('strict stream independence — no lock at any level shifts any other value', () => {
+  /** Compare two remix outputs with the guarded values — and the lock flags
+   *  themselves, which are inputs, not outputs — normalized away. The pattern
+   *  layer COUNT is guarded (count lock / implication), but the shared prefix
+   *  must still be candidate-identical, so the first layer is kept with its
+   *  guarded visibility (it follows orbType) normalized. */
+  const scrub = (d: OrbDoc) => {
+    const pats = patterns(d)
+    return json({
+      ...d,
+      orbType: '<x>',
+      locks: '<locks>',
+      subLocks: '<locks>',
+      orb: { ...d.orb, radius: 0, cx: 0, cy: 0, sectors: '<x>' },
+      layers: {
+        firstPattern: pats[0] ? { ...pats[0], visible: '<v>', locks: '<locks>' } : null,
+        others: d.layers.filter((l) => l.kind !== 'pattern'),
+      },
+    })
+  }
+
+  it('holds for every sub-lock, including the count lock (no exemptions)', () => {
+    const variants: OrbDoc[] = [
+      withSubLocks({ orb: { type: true } }),
+      withSubLocks({ orb: { size: true } }),
+      withSubLocks({ orb: { position: true } }),
+      withSubLocks({ orb: { structure: true } }),
+      withSubLocks({ patterns: { count: true } }),
+    ]
+    for (const seed of SEEDS) {
+      const base = scrub(remix(FIXTURE, seed, deps))
+      for (const doc of variants) {
+        expect(scrub(remix(doc, seed, deps))).toBe(base)
+      }
+    }
+  })
+
+  it('holds for property locks on layers', () => {
+    const layerLocked: OrbDoc = {
+      ...FIXTURE,
+      layers: FIXTURE.layers.map((l, i) =>
+        l.kind === 'pattern' && i === 1 ? { ...l, locks: { rotation: true } } : l,
+      ),
+    }
+    // A property lock implies the count lock (existence implication), so its
+    // stream is compared against the count-locked baseline — everything else
+    // must be byte-identical.
+    for (const seed of SEEDS) {
+      const base = scrub(remix(withSubLocks({ patterns: { count: true } }), seed, deps))
+      expect(scrub(remix(layerLocked, seed, deps))).toBe(base)
+    }
+  })
+})
+
+describe('v3 → v4 migration', () => {
+  /** A hand-built v3 document in the legacy shape. */
+  const legacy = (mode: 'disc' | 'sliced' | 'sectors', extras: Record<string, unknown> = {}) => {
+    const base = defaultDoc('mig-seed') as unknown as Record<string, unknown>
+    const orb = { ...(base.orb as Record<string, unknown>), mode, slices: { count: 20 } }
+    const doc: Record<string, unknown> = { ...base, version: 3, orb, lockPatternCount: true, ...extras }
+    delete doc.orbType
+    delete doc.subLocks
+    delete doc.colorSource
+    return doc as unknown as OrbDoc
+  }
+
+  it('derives the type: sectors → segments, sliced → color, disc+patterns → pattern', () => {
+    expect(normalizeDoc(legacy('sectors')).orbType).toBe('segments')
+    expect(normalizeDoc(legacy('sliced')).orbType).toBe('color')
+    expect(normalizeDoc(legacy('disc')).orbType).toBe('pattern')
+  })
+
+  it('absorbs lockPatternCount into subLocks and deletes the legacy fields', () => {
+    const out = normalizeDoc(legacy('disc'))
+    expect(out.subLocks.patterns.count).toBe(true)
+    expect('lockPatternCount' in out).toBe(false)
+    expect('mode' in out.orb).toBe(false)
+    expect('slices' in out.orb).toBe(false)
+    expect(out.version).toBe(4)
+    expect(out.colorSource).toBe('palette')
+  })
+})
+
+describe('applyOrbType respects the lock tree', () => {
+  it('switches type and rewrites pattern visibility', () => {
+    const out = applyOrbType(FIXTURE, 'color')
+    expect(out.doc.orbType).toBe('color')
+    expect(patterns(out.doc).every((l) => !l.visible)).toBe(true)
+    expect(out.skipped).toEqual([])
+    const back = applyOrbType(out.doc, 'pattern')
+    expect(patterns(back.doc).filter((l) => l.visible).length).toBeGreaterThan(0)
+  })
+
+  it('a locked orb or type sub-lock blocks the switch and reports it', () => {
+    const locked = { ...withLocks({ orb: true }) }
+    const out = applyOrbType(locked, 'segments')
+    expect(out.doc.orbType).toBe(locked.orbType)
+    expect(out.skipped).toContain('orb')
+
+    const sub = withSubLocks({ orb: { type: true } })
+    const out2 = applyOrbType(sub, 'segments')
+    expect(out2.doc.orbType).toBe(sub.orbType)
+    expect(out2.skipped).toContain('orb')
+  })
+
+  it('locked patterns keep their visibility and report it', () => {
+    const locked = withLocks({ patterns: true })
+    const out = applyOrbType(locked, 'color')
+    expect(patterns(out.doc).map((l) => l.visible)).toEqual(
+      patterns(locked).map((l) => l.visible),
+    )
+    expect(out.skipped).toContain('patterns')
   })
 })

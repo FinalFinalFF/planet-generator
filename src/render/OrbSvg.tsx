@@ -200,68 +200,6 @@ function ConicSweep({
   return <g clipPath={`url(#${clipId})`}>{wedges}</g>
 }
 
-/* ---------- sliced sphere ---------- */
-
-/**
- * Concentric bands about a focus outside the orb: drawn largest first, so
- * each smaller circle paints over the last and leaves an annulus visible. With
- * the focus off to one side those annuli read as curved bands sweeping across
- * the whole disc. The second family's focus sits `fan` degrees away, so its
- * bands cross the first family's and cut them into diamond cells.
- */
-function SlicedOrb({ ctx }: { ctx: Ctx }) {
-  const { cx, cy, r, prefix, palette, doc } = ctx
-  const s = doc.orb.slices
-  const g = doc.orb.gradient
-  const count = clamp(Math.round(s.count), 1, 96)
-  const families = s.families === 1 ? 1 : 2
-  const squash = clamp(s.arc, 0.05, 3)
-  // Keep the focus outside the disc; inside it the bands collapse to a bullseye.
-  const dist = Math.max(1.02, s.curvature) * r
-
-  const family = (f: number, alpha: number) => {
-    const focusAngle = s.angle + (families === 1 ? 0 : f === 0 ? -s.fan / 2 : s.fan / 2)
-    const dir = dirFromAngle(focusAngle)
-    const fx = cx + dir.dx * dist
-    const fy = cy + dir.dy * dist
-    // Radii derived to span the orb, so bands always reach both limbs.
-    const rMin = Math.max(1, dist - r * 1.04)
-    const rMax = dist + r * 1.04
-    const out: React.ReactNode[] = []
-    for (let i = count - 1; i >= 0; i--) {
-      const t = count === 1 ? 0.5 : i / (count - 1)
-      const rad = rMin + (rMax - rMin) * t
-      const rampT = (((t + (f === 1 ? s.phase : 0)) % 1) + 1) % 1
-      const sample = sampleGradient(g, palette, rampT)
-      out.push(
-        <ellipse
-          key={`${f}-${i}`}
-          cx={n(fx)}
-          cy={n(fy)}
-          rx={n(rad)}
-          ry={n(rad * squash)}
-          fill={withAlpha(sample.hex, sample.alpha * alpha)}
-          transform={
-            squash === 1 ? undefined : `rotate(${n(focusAngle)} ${n(fx)} ${n(fy)})`
-          }
-        />,
-      )
-    }
-    return out
-  }
-
-  // Always clipped: bands are concentric, so letting them run free just floods
-  // the canvas rather than scalloping a silhouette.
-  return (
-    <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sliced orb">
-      <g>{family(0, clamp(s.alpha, 0, 1))}</g>
-      {families === 2 && (
-        <g style={blendStyle(s.blend)}>{family(1, clamp(s.modulation, 0, 1))}</g>
-      )}
-    </g>
-  )
-}
-
 /* ---------- sector collage ---------- */
 
 /** A SectorFill ramp as a throwaway two-stop Gradient, for GradientDef. */
@@ -874,15 +812,14 @@ export function OrbSvg({
         </g>
       )}
 
-      {doc.orb.visible && doc.orb.mode === 'sliced' && <SlicedOrb ctx={ctx} />}
-      {doc.orb.visible && doc.orb.mode === 'sectors' && <SectorOrb ctx={ctx} />}
+      {doc.orb.visible && doc.orbType === 'segments' && <SectorOrb ctx={ctx} />}
 
-      {doc.orb.visible && doc.orb.mode === 'disc' && doc.solidFills && (
+      {doc.orb.visible && doc.orbType !== 'segments' && doc.solidFills && (
         // Solid fills: the disc gradient collapses to its mid-ramp ink. The
         // gradient itself is untouched, so toggling this off restores it.
         <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={solidFor(doc.orb.gradient, palette)} data-name="Orb disc" />
       )}
-      {doc.orb.visible && doc.orb.mode === 'disc' && !doc.solidFills && (
+      {doc.orb.visible && doc.orbType !== 'segments' && !doc.solidFills && (
         <Fragment>
           {doc.orb.gradient.type === 'conic' ? (
             <ConicSweep
