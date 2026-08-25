@@ -12,7 +12,27 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
-### Added: procedural textures + sector texture cells + `sector-collage` (v2, Phases 2–3)
+### Changed: v2 goes flat-first — remix and defaults stop producing rendered lighting
+
+Client feedback on the Phase 3 remix grid: disc-mode results still came out as
+shaded spheres with terminators and highlights — the literalness v2 exists to
+retire. The fix is a stance, not a mode:
+
+- **`defaultDoc` ships the shading layer invisible and the rim light disabled.**
+  Both keep their tuned values, so the layer toggle and the `shaded-sphere`
+  style land somewhere sensible when someone opts back in.
+- **Remix never turns shading or the rim *on*.** Their values are still dealt
+  (the RNG stream is unchanged — visibility is a pure selection), but
+  `visible`/`enabled` follow the incoming document. A flat document stays flat
+  through any number of remixes; a legacy document that has shading visible
+  keeps remixing it, because that is the user's own setting.
+- **Only `shaded-sphere` reintroduces shading.** `patterned-disc` and
+  `overlap-bloom` now set it invisible — the crisp ink and the lens overlaps
+  carry those looks, matching the image 40 reference discs.
+
+Deliberately NOT done: forcing `doc.flat` (a standing user constraint remix
+and styles never write) and removing orbit rings from disc/sliced remixes (the
+complaint was lighting; orbits are a separate conversation if they come up).
 
 The abstract direction's print vocabulary, built as four generators in
 `src/lib/patterns/textures/` — concentric rings, radial rules, vertical-bar

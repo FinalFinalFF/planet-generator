@@ -281,7 +281,10 @@ function remixAccents(rng: Rng, palette: Palette, prev: AccentLayer, lockColors:
     strokeWidth: rng.bool(0.25) ? rng.float(1, 3) : 0,
   }))
 
-  const rimOn = rng.bool(0.68)
+  // Drawn but only honored when the incoming rim was already on: the v2
+  // direction avoids lighting cues, so remix never *introduces* the rim — it
+  // only re-deals one the user (or a legacy document) already has.
+  const rimOn = rng.bool(0.68) && prev.rim.enabled
   return {
     ...prev,
     rings,
@@ -514,8 +517,17 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
 
   // The layer-existence guards stay: a document with no shading layer really
   // does consume fewer draws, because that is doc state. Only the lock guards go.
+  //
+  // Visibility follows the incoming layer: the v2 direction avoids rendered
+  // lighting, so remix never turns shading *on* — a flat document stays flat
+  // through any number of remixes, and shading returns only by explicit choice
+  // (the layer toggle or the shaded-sphere style). A document that already has
+  // it visible keeps it, except under a self-carrying orb.
   const shadingCandidate: ShadingLayer | null = prevShading
-    ? { ...remixShading(rng, palette, prevShading, locks.colors), visible: !busyNow }
+    ? {
+        ...remixShading(rng, palette, prevShading, locks.colors),
+        visible: prevShading.visible && !busyNow,
+      }
     : null
 
   // Orbit rings and satellites around a sector collage read as astronomy —

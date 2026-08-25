@@ -207,7 +207,9 @@ export function makeAccentLayer(overrides: Partial<AccentLayer> = {}): AccentLay
       },
     ],
     rim: {
-      enabled: true,
+      // Off by default — the crescent is a lighting cue, and v2 avoids those.
+      // The tuned values stay so enabling it lands somewhere sensible.
+      enabled: false,
       angle: 306,
       width: 0.016,
       spread: 0.3,
@@ -273,7 +275,10 @@ export function defaultDoc(seed: string): OrbDoc {
       ],
       mask: { mode: 'lens', cx: 0.28, cy: 0.24, radius: 0.92, feather: 0.45 },
     },
-    makeShadingLayer({ id: 'sh-default' }),
+    // v2 opens flat-graphic: the layers exist with tuned values so the
+    // shaded-sphere style and the layer toggles can bring them back, but
+    // nothing renders as lighting until someone asks for it.
+    makeShadingLayer({ id: 'sh-default', visible: false }),
     makeAccentLayer({ id: 'ac-default' }),
   ]
 
@@ -446,8 +451,8 @@ function planFor(style: OrbStyle): StylePlan {
       }
 
     case 'patterned-disc':
-      // Crisp ink across the whole disc, shading pulled back so the pattern
-      // stays legible edge to edge.
+      // Crisp ink across the whole disc. v2: no shading at all — the pattern
+      // and the gradient carry it, matching the image 40 reference discs.
       return {
         orb: (p) => ({ ...p, mode: 'disc' }),
         pattern: (p, i) => ({
@@ -457,13 +462,7 @@ function planFor(style: OrbStyle): StylePlan {
           opacity: i === 0 ? 0.72 : p.opacity,
           mask: { ...p.mask, mode: 'orb' as const },
         }),
-        shading: {
-          visible: true,
-          shadow: 0.4,
-          highlight: 0.16,
-          contactShadow: 0.3,
-          highlightSize: 0.9,
-        },
+        shading: { visible: false },
         accentsVisible: true,
       }
 
@@ -486,7 +485,8 @@ function planFor(style: OrbStyle): StylePlan {
             feather: 0.55,
           },
         }),
-        shading: { visible: true, shadow: 0.62, highlight: 0.28, contactShadow: 0.42 },
+        // v2: the lens overlaps carry the depth; no rendered lighting.
+        shading: { visible: false },
         accentsVisible: true,
       }
 
