@@ -317,6 +317,20 @@ export type OrbDoc = {
    * it off restores the user's shading and rim settings exactly.
    */
   flat: boolean
+  /**
+   * Render every smooth gradient as a flat ink sampled from its own ramp —
+   * the second standing constraint beside `flat`, and the same design: it
+   * changes what renders, never the data, so toggling it off restores every
+   * gradient exactly. Suppressed: the orb's disc gradient (linear, radial and
+   * conic), the background gradient, sector `ramp` cells, and the vignette.
+   * Kept: sliced-mode bands (discrete samples — already flat fills) and
+   * pattern-internal gradient spreads (they are the artwork's texture).
+   *
+   * Independent of `flat` on purpose: gradients read as sphere *surfaces*,
+   * shading reads as sphere *lighting*, and the client may want either cue
+   * gone without the other. Like `flat`, deliberately not in `doc.locks`.
+   */
+  solidFills: boolean
 }
 
 export type Preset = {

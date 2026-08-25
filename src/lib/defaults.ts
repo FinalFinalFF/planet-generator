@@ -329,6 +329,7 @@ export function defaultDoc(seed: string): OrbDoc {
     layers,
     lockPatternCount: false,
     flat: false,
+    solidFills: false,
     locks: {
       colors: false,
       orb: false,
@@ -397,6 +398,7 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
     locks: { ...locks, orb: locks.orb ?? legacyPlanetLock ?? false } as Locks,
     lockPatternCount: doc.lockPatternCount ?? false,
     flat: doc.flat ?? false,
+    solidFills: doc.solidFills ?? false,
   }
   delete (out as { planet?: unknown }).planet
   return out as OrbDoc

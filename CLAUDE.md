@@ -212,6 +212,16 @@ randomization, this changes what renders. `detectOrbStyle` treats shading as
 invisible when flat, so a suppressed-shading document does not claim to be
 `shaded-sphere`.
 
+**`doc.solidFills` is the second standing constraint**, same design and same
+rules: render-side only (every smooth gradient collapses to its own mid-ramp
+ink via `solidFor`), survives remix via the `{ ...doc }` spread, not in
+`doc.locks`, asserted by the same no-mutation test pattern in `remix.test.ts`.
+Suppressed: the disc gradient, the background gradient, sector ramp cells, and
+the vignette (a smooth blend — unlike flat mode, which keeps it). Kept: sliced
+bands (discrete samples, already flat fills) and pattern-internal gradient
+spreads (artwork texture). Independent of `flat` on purpose — gradients read
+as sphere surfaces, shading as sphere lighting, and either cue can go alone.
+
 ### Pattern pipeline (three files, one flow)
 
 `src/lib/patterns/` — `source.ts` → `parse.ts` → `registry.ts`.

@@ -102,6 +102,16 @@ function sampleGradient(g: Gradient, palette: Palette, t: number): Sample {
   return { hex: resolveColor(last.color, palette), alpha: refAlpha(last.color) }
 }
 
+/**
+ * The flat ink a gradient collapses to under `doc.solidFills`: its own ramp
+ * sampled at the midpoint, so the substitute stays palette-driven and close to
+ * the gradient's overall read rather than grabbing one end of it.
+ */
+function solidFor(g: Gradient, palette: Palette): string {
+  const s = sampleGradient(g, palette, 0.5)
+  return withAlpha(s.hex, s.alpha)
+}
+
 /** Real SVG gradient defs for linear/radial. Conic is drawn as wedges instead. */
 function GradientDef({
   id,
@@ -356,7 +366,10 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
       }
 
       const gradId = `${prefix}-secg-${ri}-${ci}`
-      if (fill.kind === 'ramp') {
+      // Under solid fills a ramp cell collapses to its midpoint ink, same as
+      // every other gradient in the document.
+      const rampSolid = fill.kind === 'ramp' && doc.solidFills
+      if (fill.kind === 'ramp' && !rampSolid) {
         defs.push(
           <GradientDef
             key={gradId}
@@ -371,7 +384,13 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
         <path
           key={`${ri}-${ci}`}
           d={rotatedRectPath(x0, y0, x1, y1, s.angle, cx, cy)}
-          fill={fill.kind === 'flat' ? color(fill.color, palette) : `url(#${gradId})`}
+          fill={
+            fill.kind === 'flat'
+              ? color(fill.color, palette)
+              : rampSolid
+                ? solidFor(rampGradient(fill as Extract<SectorFill, { kind: 'ramp' }>), palette)
+                : `url(#${gradId})`
+          }
         />,
       )
     })
@@ -704,7 +723,10 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
   const bg = doc.background
   const gradId = `${prefix}-bg-grad`
   const vignetteId = `${prefix}-bg-vignette`
-  const vignette = clamp(bg.vignette, 0, 1)
+  // Solid fills retires the vignette too: it is a smooth radial blend, and
+  // smooth blends are exactly what the toggle exists to remove. (Flat mode
+  // keeps it — that toggle is about sphere cues, this one about gradients.)
+  const vignette = doc.solidFills ? 0 : clamp(bg.vignette, 0, 1)
 
   return (
     <Fragment>
@@ -717,7 +739,16 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
           fill={color(bg.color, palette)}
         />
       )}
-      {bg.kind === 'gradient' && bg.gradient.type !== 'conic' && (
+      {bg.kind === 'gradient' && doc.solidFills && (
+        <rect
+          x={n(canvas.x)}
+          y={n(canvas.y)}
+          width={n(canvas.w)}
+          height={n(canvas.h)}
+          fill={solidFor(bg.gradient, palette)}
+        />
+      )}
+      {bg.kind === 'gradient' && !doc.solidFills && bg.gradient.type !== 'conic' && (
         <Fragment>
           <defs>
             <GradientDef id={gradId} gradient={bg.gradient} box={canvas} palette={palette} />
@@ -731,7 +762,7 @@ function BackgroundView({ ctx }: { ctx: Ctx }) {
           />
         </Fragment>
       )}
-      {bg.kind === 'gradient' && bg.gradient.type === 'conic' && (
+      {bg.kind === 'gradient' && !doc.solidFills && bg.gradient.type === 'conic' && (
         <Fragment>
           <defs>
             <clipPath id={`${prefix}-bg-clip`}>
@@ -836,7 +867,12 @@ export function OrbSvg({
       {doc.orb.visible && doc.orb.mode === 'sliced' && <SlicedOrb ctx={ctx} />}
       {doc.orb.visible && doc.orb.mode === 'sectors' && <SectorOrb ctx={ctx} />}
 
-      {doc.orb.visible && doc.orb.mode === 'disc' && (
+      {doc.orb.visible && doc.orb.mode === 'disc' && doc.solidFills && (
+        // Solid fills: the disc gradient collapses to its mid-ramp ink. The
+        // gradient itself is untouched, so toggling this off restores it.
+        <circle cx={n(cx)} cy={n(cy)} r={n(r)} fill={solidFor(doc.orb.gradient, palette)} />
+      )}
+      {doc.orb.visible && doc.orb.mode === 'disc' && !doc.solidFills && (
         <Fragment>
           {doc.orb.gradient.type === 'conic' ? (
             <ConicSweep

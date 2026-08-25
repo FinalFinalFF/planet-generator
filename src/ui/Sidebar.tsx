@@ -620,6 +620,16 @@ export function Sidebar(props: SidebarProps) {
           restores them.
         </div>
         <Check
+          label="Solid fills — no gradients"
+          checked={doc.solidFills}
+          onChange={(solidFills) => update((d) => ({ ...d, solidFills }))}
+        />
+        <div className="note">
+          Renders every smooth gradient as a flat ink sampled from its own ramp: the disc fill,
+          the background, sector ramps and the vignette. Sliced bands stay (already flat fills).
+          Gradient settings are kept, so turning it off restores them.
+        </div>
+        <Check
           label="Visible"
           checked={doc.orb.visible}
           onChange={(visible) => update((d) => ({ ...d, orb: { ...d.orb, visible } }))}

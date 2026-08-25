@@ -12,6 +12,27 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: `solidFills` — the gradients-off standing constraint
+
+Client follow-up to flat-first: gradients themselves can read as spherical 3D
+rendering (a radial ramp on a disc is a lit sphere in all but name). New
+document flag `solidFills`, built as flat mode's sibling: render-side only —
+`OrbSvg` collapses every smooth gradient to its own ramp's midpoint ink
+(`solidFor`) — so toggling it off restores every gradient exactly, and remix
+carries it with zero special casing via the `{ ...doc }` spread.
+
+Scope decisions: the vignette is suppressed too (it is a smooth radial blend,
+which is exactly what the toggle removes — flat mode keeps it because flat is
+about sphere *cues*, not blends). Sliced bands stay (discrete ramp samples,
+already flat fills), and pattern-internal gradient spreads stay (they are the
+artwork's texture, not a document fill). Kept independent of `flat` rather
+than folded into it: gradients read as sphere surfaces, shading as sphere
+lighting, and the client may want either gone without the other. Orbit rings
+and satellites were explicitly kept, per the same feedback round.
+
+`remix.test.ts` gained a `solid fills` block mirroring the flat-mode contract
+(survival + changes-nothing-but-the-flag), sabotaged once to confirm it bites.
+
 ### Added: second texture wave, mined from the older reference boards
 
 Four more generators in `src/lib/patterns/textures/`, sourced from `Examples/`

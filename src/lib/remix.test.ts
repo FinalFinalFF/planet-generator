@@ -281,6 +281,36 @@ describe('flat mode', () => {
   })
 })
 
+/*
+ * Solid fills is the second standing constraint, and it holds by the same
+ * contract as flat: survives any remix, never turned on by one, and changes
+ * nothing in the document but the flag — the gradients it suppresses must
+ * come back exactly when it is toggled off.
+ */
+describe('solid fills', () => {
+  const solid: OrbDoc = { ...FIXTURE, solidFills: true }
+  const SEEDS = ['sf1', 'sf2', 'sf3', 'sf4']
+
+  it('survives remix, remixSection and shuffleColors; never turned on', () => {
+    for (const seed of SEEDS) {
+      expect(remix(solid, seed, deps).solidFills).toBe(true)
+      expect(remix(FIXTURE, seed, deps).solidFills).toBe(false)
+    }
+    for (const section of ['background', 'orb', 'patterns', 'shading', 'accents'] as const) {
+      expect(remixSection(solid, section, `sf-${section}`, deps).solidFills).toBe(true)
+    }
+    expect(shuffleColors(solid, palette, 'sf-shuffle').solidFills).toBe(true)
+  })
+
+  it('changes nothing but the flag, so toggling it off restores gradients exactly', () => {
+    for (const seed of SEEDS) {
+      const solidOut = remix(solid, seed, deps)
+      const plainOut = remix(FIXTURE, seed, deps)
+      expect(json({ ...solidOut, solidFills: false })).toBe(json(plainOut))
+    }
+  })
+})
+
 describe('locked sections keep their stack position, not just their contents', () => {
   // A deliberately non-canonical stack: accent mid-stack, shading last.
   const arranged: OrbDoc = (() => {
