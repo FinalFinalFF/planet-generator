@@ -40,7 +40,84 @@ import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
 import { DEFAULT_LAYER_MASK, nextId } from '../lib/defaults'
+import {
+  PICKABLE_BRAND_GRADIENTS,
+  brandGradientFor,
+  nearestSlot,
+  type BrandGradient,
+} from '../lib/brand'
 import type { CellPropertyLock, LayerPropertyLock, PropertyLocks } from '../types'
+
+/* ---------- the RSAC Spectrum Strip ---------- */
+
+const CHAINED = PICKABLE_BRAND_GRADIENTS.filter((g) => g.chained)
+const CROSS_LINKS = PICKABLE_BRAND_GRADIENTS.filter((g) => !g.chained)
+
+const cssGradient = (g: BrandGradient): string =>
+  `linear-gradient(90deg, ${g.stops
+    .map((s) => `${s.hex} ${Math.round(s.offset * 100)}%`)
+    .join(', ')})`
+
+/**
+ * Eight of the ten named brand gradients chain end-to-start into one master
+ * spectrum, so the picker is one continuous strip you select a segment from —
+ * not a dropdown of ten names. Energy and Contrast use off-chain hexes and sit
+ * beneath as labeled cross-links, honestly presented as not-segments.
+ */
+function BrandGradientStrip({
+  onPick,
+  active,
+}: {
+  onPick?: (g: BrandGradient) => void
+  /** Highlight the active preset; `undefined` = none / custom. */
+  active?: string
+}) {
+  const pickable = !!onPick
+  return (
+    <div className="field">
+      <div className="field__label">
+        <span>{pickable ? 'Brand gradients' : 'The spectrum'}</span>
+        {active && <span>{PICKABLE_BRAND_GRADIENTS.find((g) => g.id === active)?.name ?? ''}</span>}
+      </div>
+      <div className="bstrip" role={pickable ? 'group' : undefined} aria-label="RSAC named gradients">
+        {CHAINED.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            className={`bstrip__seg${active === g.id ? ' bstrip__seg--on' : ''}`}
+            style={{ background: cssGradient(g) }}
+            title={g.name}
+            aria-label={`${g.name} gradient`}
+            disabled={!pickable}
+            onClick={() => onPick?.(g)}
+          />
+        ))}
+      </div>
+      <div className="bstrip__links">
+        {CROSS_LINKS.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            className={`bstrip__link${active === g.id ? ' bstrip__link--on' : ''}`}
+            title={`${g.name} — off-chain cross-link`}
+            disabled={!pickable}
+            onClick={() => onPick?.(g)}
+          >
+            <span className="bstrip__chipfill" style={{ background: cssGradient(g) }} />
+            {g.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Which brand preset a gradient currently is, if any (by its stop ids). */
+function activeBrandId(g: Gradient): string | undefined {
+  const first = g.stops[0]?.id ?? ''
+  const m = /^(rsac-[a-z]+)-s0$/.exec(first)
+  return m && g.stops.every((s, i) => s.id === `${m[1]}-s${i}`) ? m[1] : undefined
+}
 
 /* ---------- lock-tree helpers ---------- */
 
@@ -308,6 +385,20 @@ function SectorRowEditor({
             )}
             {fill.kind === 'ramp' && (
               <>
+                {/* Compact brand picker: a ramp cell wears a named gradient's
+                    endpoints (Radiance's mid stop collapses — noted in title). */}
+                <BrandGradientStrip
+                  onPick={(g) => {
+                    const first = g.stops[0]
+                    const last = g.stops[g.stops.length - 1]
+                    patchCell(i, {
+                      ...fill,
+                      from: { slot: nearestSlot(first.hex, palette), hex: first.hex },
+                      to: { slot: nearestSlot(last.hex, palette), hex: last.hex },
+                      angle: g.angle,
+                    })
+                  }}
+                />
                 <ColorRefEditor
                   name="Ramp from"
                   value={fill.from}
@@ -541,7 +632,13 @@ function FillEditor({
           }
         />
       ) : (
-        <GradientEditor gradient={gradient} palette={palette} onChange={onChange} />
+        <>
+          <BrandGradientStrip
+            active={activeBrandId(gradient)}
+            onPick={(g) => onChange(brandGradientFor(g, palette, gradient))}
+          />
+          <GradientEditor gradient={gradient} palette={palette} onChange={onChange} />
+        </>
       )}
     </>
   )
@@ -1833,7 +1930,9 @@ function bgQuickOf(doc: OrbDoc): BgQuick {
   if (bg.kind === 'solid') {
     const hex = (bg.color.hex ?? '').toLowerCase()
     if (hex === '#000000') return 'black'
-    if (hex === '#ffffff') return 'white'
+    // Under RSAC palettes the WHITE chip writes the brand's light ground,
+    // Off White #FDF9F6 (Q8) — both read back as "white" here.
+    if (hex === '#ffffff' || hex === '#fdf9f6') return 'white'
   }
   return 'custom'
 }
@@ -1863,8 +1962,18 @@ function CanvasSection(props: SidebarProps) {
               ...d.background,
               kind: 'solid',
               // The quick chips write literal hex overrides — the existing
-              // per-element override mechanism, no new model.
-              color: { ...d.background.color, hex: v === 'black' ? '#000000' : '#ffffff' },
+              // per-element override mechanism, no new model. WHITE is
+              // brand-true under RSAC palettes: the light ground is Off White
+              // #FDF9F6, not #FFFFFF (Q8); literal white elsewhere.
+              color: {
+                ...d.background.color,
+                hex:
+                  v === 'black'
+                    ? '#000000'
+                    : d.paletteId.startsWith('rsac-')
+                      ? '#FDF9F6'
+                      : '#ffffff',
+              },
             },
     }))
   }
@@ -2038,6 +2147,22 @@ export function Sidebar(props: SidebarProps) {
               }))
             }
           />
+          <Segmented
+            label="Color via"
+            value={doc.colorSource}
+            options={[
+              { value: 'palette', label: 'palette' },
+              { value: 'gradients', label: 'brand gradients' },
+            ]}
+            onChange={(colorSource) => update((d) => ({ ...d, colorSource }))}
+          />
+          {doc.colorSource === 'gradients' && (
+            <div className="note">
+              Remix delivers color through the named RSAC gradients instead of dealing palette
+              ramps — the collection wears only brand assets.
+            </div>
+          )}
+          <BrandGradientStrip />
           <PalettePanel palette={palette} {...props.palettePanel} />
         </Section>
 

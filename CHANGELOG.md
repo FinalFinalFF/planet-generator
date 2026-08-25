@@ -12,6 +12,59 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: v4 — the mode-first restructure (orb types, the lock tree, RSAC brand)
+
+The whole release follows the product owner's five-step workflow (2026-08-25):
+choose size+type of orb → palette drives the collection → mode-dependent
+editing with per-segment/per-layer locks → accents their own section → simple
+canvas. Decisions recorded that session: **sliced retired entirely**, **accents
+decoupled from orb type**, **one-time seed break accepted**, **brand gradients
+hex-exact**. The remaining design questions ship on the proposal's leans
+(Q7–Q12 in the design artifact).
+
+- **`orbType` replaces `orb.mode`.** `color` | `pattern` | `segments`; the Orb
+  panel renders only the chosen type's controls. Sliced is deleted — renderer,
+  config, remix dealing — and `normalizeDoc` (DOC_VERSION 4) migrates sliced
+  documents to `color`, keeping the gradient. That look-change is deliberate.
+  A "flat color" fill is a two-stop constant gradient, so there is still only
+  one fill render path.
+- **The lock tree.** Section locks → sub-locks (`orb.type/size/position/
+  structure`, `patterns.count` absorbing `lockPatternCount`, `colors.palette`)
+  → per-object property locks on pattern layers and segment cells. The
+  existence problem ("what does a locked cell mean when remix re-deals the row
+  to fewer cells?") is resolved by **existence implication**: a lock on a child
+  implies the lock that keeps the child existing, derived at remix time and
+  never stored. Dormant positional locks were rejected (a lock remix can
+  delete is a trust betrayal); identity-carrying cells were rejected (cell
+  geometry is positional by design).
+- **Fixed-width remix.** Candidates are always drawn at maximum width and
+  counts always rolled; every lock at every level is pure selection. This made
+  the determinism invariant *strict* — the grandfathered `lockPatternCount`
+  draw-count exemption is gone — at the cost of a one-time seed break
+  (accepted; seeds are session reproducibility, not archival). Accents remix
+  under every orb type now; the anti-astronomy retirement rule is deleted.
+  Remix also no longer force-shows a hidden orb — Hide orb is a standing user
+  choice.
+- **Simple/Advanced tier.** One global toggle (sticky, persisted in UI state,
+  returning profiles grandfathered to Advanced). Simple = the remix loop;
+  Advanced = everything, interleaved in place. Two primitive rules carry most
+  of it: ColorRefEditor's hex override + alpha and GradientEditor's per-stop
+  editing are Advanced. Hidden-but-rendering state (masks, blends) surfaces as
+  passive notes in Simple.
+- **RSAC Brand System** (`lib/brand.ts` + three `BUILTIN_PALETTES` entries).
+  RSAC Neutrals (8 slots, the new default palette — "the brand leads with
+  black and white"), RSAC Spectrum (12), RSAC Main (6). The ten named
+  gradients are **hex-fixed presets** — named brand assets whose identity is
+  their stops; the nearest palette slot rides along as graceful degradation.
+  Contrast's overshoot stops are resampled to effective 0%/100%; the Logomark
+  gradient ships `reserved` and appears in no picker. Eight gradients chain
+  end-to-start, so the picker is the **Spectrum Strip** — one continuous band
+  plus Energy/Contrast cross-link chips. `doc.colorSource` ('palette' |
+  'gradients') is a third standing preference: remix delivers color through
+  the named gradients when set, stream-safe because both candidates always
+  draw. The Canvas WHITE quick chip writes Off White #FDF9F6 under RSAC
+  palettes (the brand's light ground), literal white elsewhere.
+
 ### Changed: the site now lives at https://orbs.fnfn.us/
 
 Custom domain on the existing GitHub Pages deploy, three coupled pieces:

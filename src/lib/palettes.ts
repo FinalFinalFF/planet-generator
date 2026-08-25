@@ -7,6 +7,40 @@ import { luminance, normalizeHex } from './color'
  * ordering, so keep new palettes sorted the same way.
  */
 export const BUILTIN_PALETTES: Palette[] = [
+  /*
+   * The RSAC Brand System (2026-08-25), transcribed verbatim from the brand
+   * token files and admitted through the standing lightness sort. Neutrals
+   * lead — "the brand leads with black and white; color arrives through the
+   * named gradients" (see lib/brand.ts) — and being first makes RSAC Neutrals
+   * the default palette for new documents: exactly 8 slots, the width the
+   * default document assumes, so nothing clamps anywhere.
+   */
+  {
+    id: 'rsac-neutrals',
+    name: 'RSAC Neutrals',
+    builtin: true,
+    colors: ['#000000', '#333333', '#666666', '#BFBFBF', '#DDDDDD', '#E9E9E9', '#FDF9F6', '#FFFFFF'],
+  },
+  {
+    // One 12-slot palette, not Main/Secondary/Library splits: the file's
+    // grouping is a usage taxonomy, and the slot contract is lightness.
+    id: 'rsac-spectrum',
+    name: 'RSAC Spectrum',
+    builtin: true,
+    colors: [
+      '#002F4B', '#00396C', '#436083', '#DB4750', '#EA6F53', '#B08ADA',
+      '#D893A8', '#E1C5CE', '#FFC505', '#68F5D3', '#CDE0FD', '#EEEDE9',
+    ],
+  },
+  {
+    // The curated Main subset — a 12-color generative deal can get
+    // carnival-ish for restrained collections.
+    id: 'rsac-main',
+    name: 'RSAC Main',
+    builtin: true,
+    colors: ['#00396C', '#EA6F53', '#D893A8', '#FFC505', '#68F5D3', '#CDE0FD'],
+  },
+
   /*{
     id: 'ember-terminator',
     name: 'Ember Terminator',

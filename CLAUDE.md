@@ -118,28 +118,30 @@ Shading is the subtle case: its children each carry their own
 **no `opacity` attribute**. Group opacity would isolate the group and stop the
 terminator shadow from multiplying against the orb beneath it.
 
-### Orb render modes
+### Orb types (v4, mode-first)
 
-`orb.mode` is `disc` (gradient-filled circle), `sliced`, or `sectors`. `SlicedOrb`
-builds the reference's banded lattice from **concentric circles about a focus
-outside the orb**, drawn largest first so each smaller circle paints over the
-last and leaves an annulus visible. Two things there are load-bearing and easy to
-undo by accident:
+`doc.orbType` is `color` (flat-or-gradient disc), `pattern` (base fill plus 1–2
+pattern layers), or `segments` (the chord-split collage). It replaced the old
+`orb.mode` at DOC_VERSION 4, and the editor's whole Orb section keys off it —
+each type's panel shows only what that type can use.
 
-- **The base family must stay near-opaque** (`slices.alpha` ≈ 1). The bands *are*
-  the crescents left over from overpainting; a uniformly translucent stack just
-  lets the last circle drawn swamp everything under it. An earlier version
-  modeled this as marching translucent discs and produced a flat blob.
-- **Band radii are derived, not authored** — `dist ± r * 1.04` from the focus, so
-  they always span the disc. There is deliberately no radius control.
+**The `sliced` mode is retired** (2026-08-25 product decision): no type chip, no
+remix dealing, renderer and `SliceConfig` deleted. `normalizeDoc` migrates a
+sliced document to `color`, keeping its gradient — its banded lattice is gone,
+and that look-change was accepted and release-noted. Do not resurrect it
+casually; the git history has the implementation if it is ever truly wanted.
 
-`slices.blend` defaults to `multiply`; `screen` washes the disc toward white and
-loses the base hues. Slices are always clipped to the circle — concentric bands
-have no scalloped silhouette to gain by running free, they just flood the canvas.
+`applyOrbType` in `lib/defaults.ts` is the type-switch engine: it rewrites
+`orbType` and pattern-layer *visibility* together and nothing else — shading and
+accents are orthogonal to type, hidden layers keep their data so switching back
+restores them, and it respects `locks.orb`, the `orb.type` sub-lock, and
+`locks.patterns`, reporting what it skipped. A "flat color" disc is a two-stop
+constant gradient (`isFlatFill` in `Sidebar.tsx`) — one render path, no second
+fill model.
 
-### Sector mode (the v2 abstract direction)
+### Segments (the sector collage)
 
-`sectors` is the collage from the 2026-08-25 client comps: one chord splits the
+The `segments` type renders the collage from the 2026-08-25 client comps: one chord splits the
 disc into two rows, each row splits crosswise into 1–3 equal cells, each cell
 filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
 
@@ -159,11 +161,11 @@ filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
   is export-safe by construction.
 - **Ramps span the orb's box, not the cell**, so adjacent ramp cells read as one
   composition; ramp angle is absolute and ignores the structure's rotation.
-- The `sector-collage` style maps to/from `detectOrbStyle` and turns shading,
-  accents, and pattern layers off — it does **not** touch `doc.flat` (styles
-  never write the standing constraint). Remix retires accents whenever the
-  selected orb is sectors: orbit rings around a collage read as astronomy,
-  which is the literalness v2 exists to avoid.
+- **Accents are decoupled from orb type** (2026-08-25 decision, reversing the
+  earlier anti-astronomy retirement rule): remix re-deals them unless locked,
+  whatever the type. Switching to `segments` via `applyOrbType` hides pattern
+  layers but never touches shading or accents — and never `doc.flat` (nothing
+  but the user writes a standing constraint).
 
 ### Procedural textures
 
@@ -186,14 +188,41 @@ an offset circle) or `outside-lens`, with a `feather`. Implemented as an SVG
 three cases plus the soft edge. Masks are luminance-based, so the feather
 gradient's stop colors invert between `lens` and `outside-lens`.
 
-### Orb styles
+### The lock tree and the Simple/Advanced tier
 
-`applyOrbStyle` in `lib/defaults.ts` holds the recipes behind the "Orb
-style" dropdown. Each rewrites orb mode, shading, and layer visibility
-*together* and leaves palette, canvas, seed, locks and pattern choices alone.
-`detectOrbStyle` reports which one the document resembles, or `custom`. When
-adding a style, add it to `ORB_STYLES` and `ORB_STYLE_LABELS` in
-`types.ts` — the dropdown is generated from those.
+Locks come in three levels, all absolute (see Remix determinism below):
+
+- **Section locks** (`doc.locks`) — unchanged: colors, orb, patterns, shading,
+  accents, background.
+- **Sub-locks** (`doc.subLocks`) — one user-meaningful property each:
+  `orb.type`, `orb.size`, `orb.position` (cx+cy as one), `orb.structure`
+  (chord + both row counts), `patterns.count` (absorbed the old
+  `lockPatternCount` field at v4), `colors.palette` (Remix All keeps the
+  palette, still re-deals assignments — applied in `App.doRemixAll`).
+- **Property locks on objects** — `layer.locks` (pattern/color/scale/position/
+  rotation) and each `SectorFill`'s `locks` (fill/color/scale/rotation). They
+  live on the objects so identity travels through reorder and duplicate
+  (duplicating a locked layer copies its locks, deliberately).
+
+**Existence implication** is the rule that makes per-object locks coherent:
+*a lock on a child implies the lock that guarantees the child's existence.*
+Any locked cell pins the sector structure; any locked layer pins the pattern
+count. Implications are **derived at remix time** (`structureLockedFor`,
+`patternCountLockedFor` in `remix.ts`), never stored — so no un-toggle
+bookkeeping can drift. The UI renders implied locks as dimmed padlocks.
+
+Vocabulary is deliberately short — the admission test is "would a user say
+this sentence?" ("lock the size", "keep it segments"), not "is this a field?".
+Do not grow it one field at a time.
+
+The sidebar has one global **Simple/Advanced tier** (`TierContext` in
+`controls.tsx`, persisted in `storage.saveUi`, never in the doc). Simple is the
+remix loop; Advanced is everything — a strict superset, interleaved in place.
+Two primitive-level rules do most of the tiering: `ColorRefEditor` shows only
+the slot strip in Simple (hex override + alpha are Advanced), and
+`GradientEditor` hides per-stop editing. When an Advanced-only value visibly
+affects the render (a mask, a non-normal blend), Simple shows a passive note —
+hidden state that changes pixels must never be invisible.
 
 ### Flat mode
 
@@ -208,26 +237,28 @@ Two properties are load-bearing:
   rim crescent (with its gradient def, so no dead markup reaches the export);
   nothing rewrites layer data. That is what lets toggling flat back off restore the
   user's shading and rim settings exactly. Do not "simplify" this into a data
-  mutation in `remix` or `applyOrbStyle` — `remix.test.ts` asserts the
+  mutation in `remix` or `applyOrbType` — `remix.test.ts` asserts the
   no-mutation property and will fail.
 - **Because it is render-side, `remix` needs no special casing at all.** `remix`
   returns `{ ...doc, … }`, so the flag survives; the shading and rim candidates are
-  still drawn, keeping the RNG stream unchanged, and simply render suppressed. A
-  style may set `shading.visible: true`; flat outranks it at render time.
+  still drawn, keeping the RNG stream unchanged, and simply render suppressed.
+  The user may set `shading.visible: true`; flat outranks it at render time.
 
 It is deliberately **not** in `doc.locks` — a lock freezes values against
-randomization, this changes what renders. `detectOrbStyle` treats shading as
-invisible when flat, so a suppressed-shading document does not claim to be
-`shaded-sphere`.
+randomization, this changes what renders. `doc.colorSource`
+(`'palette' | 'gradients'`) is a third standing preference with the same
+citizenship: it survives remix via the spread and selects, at every gradient
+site, between the dealt slot ramp and a named RSAC brand gradient
+(`lib/brand.ts`) — both candidates are always drawn, so the stream never
+depends on it.
 
 **`doc.solidFills` is the second standing constraint**, same design and same
 rules: render-side only (every smooth gradient collapses to its own mid-ramp
 ink via `solidFor`), survives remix via the `{ ...doc }` spread, not in
 `doc.locks`, asserted by the same no-mutation test pattern in `remix.test.ts`.
 Suppressed: the disc gradient, the background gradient, sector ramp cells, and
-the vignette (a smooth blend — unlike flat mode, which keeps it). Kept: sliced
-bands (discrete samples, already flat fills) and pattern-internal gradient
-spreads (artwork texture). Independent of `flat` on purpose — gradients read
+the vignette (a smooth blend — unlike flat mode, which keeps it). Kept:
+pattern-internal gradient spreads (artwork texture). Independent of `flat` on purpose — gradients read
 as sphere surfaces, shading as sphere lighting, and either cue can go alone.
 
 ### Pattern pipeline (three files, one flow)
@@ -310,19 +341,19 @@ Layers list and once in its own numbered section. Both edit the same layer by id
 ### Remix determinism
 
 `seed → mulberry32` (`src/lib/rng.ts`), so a typed seed reproduces its output
-exactly. When adding to `remix()`, **consume the RNG stream in a fixed order
-regardless of which sections are locked** — a locked section still runs its RNG
-draws and throws the result away. Short-circuiting before the draws would shift
-every downstream section when an unrelated lock is toggled.
+exactly. Since v4, `remix()` draws **fixed-width candidates**: every count is
+rolled and every candidate drawn at maximum width (`MAX_PATTERN_LAYERS`,
+`MAX_SECTOR_CELLS`, a brand-pick float at every gradient site), then every lock
+at every level — section, sub-lock, property — is applied as a pure selection
+consuming zero draws. The invariant is **strict**: the number of draws depends
+on the seed and on doc/deps state (does a shading layer exist, are patterns
+parsed), never on any lock. The old grandfathered `lockPatternCount` draw-count
+exemption is gone; do not reintroduce one. The same rule applies inside
+`remixGradient`, `remixPatternLayer` and `remixAccents`, which each have a
+`lockColors` path, and inside `dealFill`'s colorSource selection.
 
-Structurally, that means: compute every section's candidate unconditionally and in
-a fixed order, then apply the locks as a pure selection between the candidate and
-the incoming value. **Never branch on a lock in a way that changes how many values
-are drawn** — compute both and choose. The draw count may legitimately depend on
-doc state (how many layers exist, `lockPatternCount`, `prevPatterns.length`) and on
-earlier draws (`!sliced && rng.bool(…)`); it must not depend on `doc.locks`. The
-same rule applies inside `remixGradient`, `remixPatternLayer` and `remixAccents`,
-which each have a `lockColors` path.
+The v4 restructure was a deliberate one-time seed break (accepted 2026-08-25):
+pre-v4 seeds do not reproduce their outputs.
 
 This was violated once and fixed — see CHANGELOG. `src/lib/remix.test.ts` now locks
 it in, along with lock absoluteness and stack-position preservation, so `npm test`
@@ -330,13 +361,15 @@ catches a regression. When you change `remix()`, run it — and if you add an
 assertion, sabotage it once to confirm it is not passing vacuously.
 
 **A lock is absolute** — this is a stated product rule, not an implementation
-detail. Nothing writes to a locked section: not Remix, not Remix All, not
-`shuffleColors`, not that section's own dice, and **not `applyOrbStyle`** (which
-respects the locks per section and reports which ones it skipped, so the UI can say
-so). Every exported entry point in `remix.ts` early-returns on `doc.locks`, so a
-caller that forgets to check still cannot break the rule; the UI additionally
-disables controls a lock has made inert. Keep both halves when adding a new
-randomizer *or a new macro*.
+detail, and it holds at every level of the tree. Nothing writes to a locked
+value: not Remix, not Remix All, not `shuffleColors` (which also respects
+per-object `color` locks), not any dice — a sub-lock holds even against its own
+section's dice — and **not `applyOrbType`** (which respects `locks.orb`, the
+type sub-lock and `locks.patterns`, and reports what it skipped). Every exported
+entry point guards, so a caller that forgets to check still cannot break the
+rule; the UI additionally renders implied/partial lock states. Keep both halves
+when adding a new randomizer *or a new macro*. Locks guard randomizers and
+macros only — never the user's own hand-edits.
 
 **What a lock does and does not freeze.** A section lock freezes that section's
 **values** — settings and geometry. It does **not** pin the section's rendered
@@ -349,9 +382,9 @@ keeping in mind:
 - Do not "fix" this by having section locks capture literal hexes. Slot indirection
   is the whole point of the color system; freezing hexes would break palette
   switching for the locked section forever.
-- The `detectOrbStyle` dropdown reads pattern/shading *visibility*, so remixing
-  those flips the Composition style label even when the orb is locked. That is
-  the label reporting the composition honestly, not a leak.
+- The Orb section's hint reads `orbType`, which a section lock or type
+  sub-lock freezes — but pattern-layer *visibility* still follows remix's type
+  selection, honestly reporting what renders.
 
 The lock chip's tooltip states the settings-vs-colors split (`lockTitle` in
 `Section.tsx`); keep it accurate if the semantics ever change.
