@@ -408,19 +408,38 @@ export function ColorRefEditor({
   const resolved = resolveColor(value, palette)
   const alpha = refAlpha(value)
   const overridden = !!value.hex
+  // A fully transparent ink (pattern plates ship at alpha 0 on purpose) makes
+  // the slot strip look broken in Simple, where the Alpha slider is hidden —
+  // picking a color changes nothing on canvas. Hidden state that changes
+  // pixels must never be invisible, so say so and offer the one-tap fix.
+  const hidden = showAlpha && alpha <= 0.001
 
   return (
     <div className="colorref">
       <div className="colorref__head">
         {chip && <span className="colorref__chip" style={{ background: chip }} title={`Source ${chip}`} />}
         <span className="colorref__name">{name}</span>
-        <span>{overridden ? 'hex' : `slot ${value.slot}`}</span>
+        <span>{hidden ? 'hidden · alpha 0' : overridden ? 'hex' : `slot ${value.slot}`}</span>
       </div>
       <SlotStrip
         palette={palette}
         slot={overridden ? -1 : value.slot}
         onPick={(slot) => onChange({ ...value, slot, hex: null })}
       />
+      {hidden && !advanced && (
+        <div className="field__row">
+          <span className="note" style={{ flex: 1 }}>
+            This ink is fully transparent, so color picks don't show.
+          </span>
+          <button
+            type="button"
+            className="btn btn--tiny"
+            onClick={() => onChange({ ...value, alpha: 1 })}
+          >
+            show
+          </button>
+        </div>
+      )}
       {advanced && (
         <div className="field__row">
           <input
