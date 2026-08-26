@@ -455,42 +455,40 @@ function SectorRowEditor({
                   onChange={(id) => onSetTexture(rowKey, i, id)}
                 />
                 <Adv>
-                  <div className="grid2">
-                    <Slider
-                      label="Scale"
-                      value={fill.scale}
-                      min={0.2}
-                      max={4}
-                      tools={
-                        <AdvLock
-                          on={!!fill.locks?.scale}
-                          title="Lock the texture scale against remix."
-                          onToggle={(on) =>
-                            patchCell(i, { ...fill, locks: { ...fill.locks, scale: on } })
-                          }
-                        />
-                      }
-                      onChange={(scale) => patchCell(i, { ...fill, scale })}
-                    />
-                    <Slider
-                      label="Rotation"
-                      value={fill.rotation}
-                      min={0}
-                      max={360}
-                      step={1}
-                      suffix="°"
-                      tools={
-                        <AdvLock
-                          on={!!fill.locks?.rotation}
-                          title="Lock the texture rotation against remix."
-                          onToggle={(on) =>
-                            patchCell(i, { ...fill, locks: { ...fill.locks, rotation: on } })
-                          }
-                        />
-                      }
-                      onChange={(rotation) => patchCell(i, { ...fill, rotation })}
-                    />
-                  </div>
+                  <Slider
+                    label="Scale"
+                    value={fill.scale}
+                    min={0.2}
+                    max={4}
+                    tools={
+                      <AdvLock
+                        on={!!fill.locks?.scale}
+                        title="Lock the texture scale against remix."
+                        onToggle={(on) =>
+                          patchCell(i, { ...fill, locks: { ...fill.locks, scale: on } })
+                        }
+                      />
+                    }
+                    onChange={(scale) => patchCell(i, { ...fill, scale })}
+                  />
+                  <Slider
+                    label="Rotation"
+                    value={fill.rotation}
+                    min={0}
+                    max={360}
+                    step={1}
+                    suffix="°"
+                    tools={
+                      <AdvLock
+                        on={!!fill.locks?.rotation}
+                        title="Lock the texture rotation against remix."
+                        onToggle={(on) =>
+                          patchCell(i, { ...fill, locks: { ...fill.locks, rotation: on } })
+                        }
+                      />
+                    }
+                    onChange={(rotation) => patchCell(i, { ...fill, rotation })}
+                  />
                 </Adv>
                 {parsed?.groups.map((g) => (
                   <ColorRefEditor
@@ -763,31 +761,29 @@ function OrbSection(props: SidebarProps) {
         />
       </div>
       <Adv>
-        <div className="grid2">
-          <Slider
-            label="Center X"
-            value={doc.orb.cx}
-            min={-0.5}
-            max={1.5}
-            tools={
-              // One glyph guards the pair — two fields, one user idea.
-              <PropLock
-                on={sub.position}
-                implied={doc.locks.orb}
-                title="Lock the position: remix keeps center X and Y together."
-                onToggle={setSub('position')}
-              />
-            }
-            onChange={(cx) => patchOrb({ cx }, 'orb-cx')}
-          />
-          <Slider
-            label="Center Y"
-            value={doc.orb.cy}
-            min={-0.5}
-            max={1.5}
-            onChange={(cy) => patchOrb({ cy }, 'orb-cy')}
-          />
-        </div>
+        <Slider
+          label="Center X"
+          value={doc.orb.cx}
+          min={-0.5}
+          max={1.5}
+          tools={
+            // One glyph guards the pair — two fields, one user idea.
+            <PropLock
+              on={sub.position}
+              implied={doc.locks.orb}
+              title="Lock the position: remix keeps center X and Y together."
+              onToggle={setSub('position')}
+            />
+          }
+          onChange={(cx) => patchOrb({ cx }, 'orb-cx')}
+        />
+        <Slider
+          label="Center Y"
+          value={doc.orb.cy}
+          min={-0.5}
+          max={1.5}
+          onChange={(cy) => patchOrb({ cy }, 'orb-cy')}
+        />
       </Adv>
       <hr className="divider" />
 
@@ -1165,29 +1161,27 @@ function PatternLayerEditor({
           }
           onChange={(rotation) => onPatch((l) => ({ ...l, rotation }), `pat-rot-${layer.id}`)}
         />
-        <div className="grid2">
-          <Slider
-            label="Offset X"
-            value={layer.offsetX}
-            min={-1}
-            max={1}
-            tools={
-              <AdvLock
-                on={!!k.position}
-                title="Lock the position: remix keeps offset X and Y together."
-                onToggle={setLock('position')}
-              />
-            }
-            onChange={(offsetX) => onPatch((l) => ({ ...l, offsetX }), `pat-ox-${layer.id}`)}
-          />
-          <Slider
-            label="Offset Y"
-            value={layer.offsetY}
-            min={-1}
-            max={1}
-            onChange={(offsetY) => onPatch((l) => ({ ...l, offsetY }), `pat-oy-${layer.id}`)}
-          />
-        </div>
+        <Slider
+          label="Offset X"
+          value={layer.offsetX}
+          min={-1}
+          max={1}
+          tools={
+            <AdvLock
+              on={!!k.position}
+              title="Lock the position: remix keeps offset X and Y together."
+              onToggle={setLock('position')}
+            />
+          }
+          onChange={(offsetX) => onPatch((l) => ({ ...l, offsetX }), `pat-ox-${layer.id}`)}
+        />
+        <Slider
+          label="Offset Y"
+          value={layer.offsetY}
+          min={-1}
+          max={1}
+          onChange={(offsetY) => onPatch((l) => ({ ...l, offsetY }), `pat-oy-${layer.id}`)}
+        />
         <Select
           label="Blend mode"
           value={layer.blend}
