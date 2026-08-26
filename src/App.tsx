@@ -719,6 +719,22 @@ export default function App() {
     [doc.canvas.width, doc.canvas.height, transparent, notify],
   )
 
+  /** One batch cell for Figma, without promoting it — same path as the
+   *  single-orb Copy for Figma, fed by the cell's live node. */
+  const copyBatchCellForFigma = useCallback(
+    async (cell: BatchCell, el: SVGSVGElement) => {
+      try {
+        await navigator.clipboard.writeText(
+          serializeSvg(el, { transparent, expandPatterns: true, onNote: notify }),
+        )
+        notify(`Copied ${cell.seed} — paste into Figma with ⌘V`)
+      } catch {
+        notify('Clipboard access was blocked', true)
+      }
+    },
+    [transparent, notify],
+  )
+
   const promoteBatchCell = useCallback(
     (next: OrbDoc) => {
       replace(next)
@@ -905,6 +921,7 @@ export default function App() {
           onPromote={promoteBatchCell}
           onExportAll={exportBatch}
           onCopyFigma={copyBatchForFigma}
+          onCopyCellFigma={copyBatchCellForFigma}
         />
       )}
 

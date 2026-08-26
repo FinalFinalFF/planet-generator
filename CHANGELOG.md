@@ -14,6 +14,10 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ### Added: batch "Copy for Figma" — the whole collection in one paste
 
+Each cell also carries its own **Figma** button beside Promote, copying that
+one orb without loading it into the editor — same serialization as the
+single-orb path, toast named by seed.
+
 Each rendered batch cell is serialized exactly like its single-file export
 (tiles expanded, layers named) and nested as an `<svg x y id="orb-<seed>">` in
 a near-square grid with an 8%-of-canvas gutter, under one root svg. Per-cell

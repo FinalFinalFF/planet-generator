@@ -30,6 +30,8 @@ export type BatchPanelProps = {
   onExportAll: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
   /** Copy the whole collection to the clipboard as one grid SVG for Figma. */
   onCopyFigma: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
+  /** Copy one cell for Figma without promoting it. */
+  onCopyCellFigma: (cell: BatchCell, el: SVGSVGElement) => void
 }
 
 export type BatchCell = {
@@ -54,13 +56,24 @@ const BatchCellView = memo(function BatchCellView({
   parsedById,
   onNode,
   onPromote,
+  onCopyFigma,
 }: {
   cell: BatchCell
   parsedById: Map<string, ParsedPattern>
   onNode: (seed: string, el: SVGSVGElement | null) => void
   onPromote: (doc: OrbDoc) => void
+  onCopyFigma: (cell: BatchCell, el: SVGSVGElement) => void
 }) {
-  const ref = useCallback((el: SVGSVGElement | null) => onNode(cell.seed, el), [cell.seed, onNode])
+  // Kept locally too, so this cell can hand itself to the per-cell copy
+  // without a lookup in the parent's map.
+  const elRef = useRef<SVGSVGElement | null>(null)
+  const ref = useCallback(
+    (el: SVGSVGElement | null) => {
+      elRef.current = el
+      onNode(cell.seed, el)
+    },
+    [cell.seed, onNode],
+  )
   return (
     <figure className="batch__cell">
       <OrbSvg
@@ -77,6 +90,14 @@ const BatchCellView = memo(function BatchCellView({
         <span className="batch__seed" title={`${cell.seed} · ${cell.palette.name}`}>
           {cell.seed}
         </span>
+        <button
+          type="button"
+          className="btn btn--tiny"
+          onClick={() => elRef.current && onCopyFigma(cell, elRef.current)}
+          title="Copy this orb as SVG — paste into Figma with ⌘V"
+        >
+          Figma
+        </button>
         <button
           type="button"
           className="btn btn--tiny"
@@ -115,6 +136,7 @@ export function BatchPanel({
   onPromote,
   onExportAll,
   onCopyFigma,
+  onCopyCellFigma,
 }: BatchPanelProps) {
   const [cols, setCols] = useState<'3' | '4' | '5'>('3')
   const [batchSeed, setBatchSeed] = useState(newBatchSeed)
@@ -249,6 +271,7 @@ export function BatchPanel({
       >
         {cells.map((cell) => (
           <BatchCellView
+            onCopyFigma={onCopyCellFigma}
             key={cell.seed}
             cell={cell}
             parsedById={parsedById}
