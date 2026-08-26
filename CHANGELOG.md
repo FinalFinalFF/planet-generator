@@ -12,12 +12,24 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
-### Added: the shipped default preset — RSAC Collage
+### Changed: staging-review polish, second round
 
-The first curated builtin (exported from staging 2026-08-25, seed
-dusk-pulse-932): the segments collage on RSAC Main, flagged default, so a
+Palette JSON export/import moved behind the Palette section's
+more-settings (interop, not a reacting surface). Padlocked slider pairs
+(Center X/Y, layer offsets, cell scale/rotation) stack vertically — two
+columns plus a padlock broke the 348px frame. The phantom page scrollbar
+is gone (.sidebar became the containing block for its visually-hidden
+file inputs). Passive blend/mask tags on layer cards are buttons that
+open that card's advanced scope.
+
+### Added: the shipped default preset — RSAC Collage Spectrum
+
+The sole curated builtin (exported from staging 2026-08-25, seed
+dusk-pulse-932, revised the same evening): the segments collage on RSAC
+Spectrum with color via the named brand gradients, flagged default, so a
 brand-new visitor's first document is the brand look rather than a
-hard-coded composition. Preset loads now run through normalizeDoc on every
+hard-coded composition. An earlier RSAC-Main variant was replaced by the
+product owner's pick. Preset loads now run through normalizeDoc on every
 load (builtins ship raw in code and user presets may predate the current
 doc version). The passive blend/mask state tags on layer cards became
 buttons that open that card's advanced scope — state you can see is now
