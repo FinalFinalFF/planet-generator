@@ -504,9 +504,12 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     sectorAngleKind === 'h' ? 0 : sectorAngleKind === 'v' ? 90 : sectorFreeAngle
   const sectorOffsetDraw = rng.float(-0.45, 0.45)
   const sectorOffset = rng.bool(0.55) ? 0 : sectorOffsetDraw
-  // The print vocabulary first; any parsed pattern works as a cell texture.
-  const texturePool = deps.available.filter((p) => p.id.startsWith('tx-'))
-  const cellPool = texturePool.length > 0 ? texturePool : deps.available
+  // Cells deal from the whole enabled pool. This used to prefer the tx-
+  // procedurals — written when the only file patterns were heavy geometry
+  // grids — which silently vetoed every curated file pattern from every
+  // segment cell (found 2026-08-25: 0 of 31 file patterns in 228 dealt
+  // cells). The Library's include-toggles are the curation surface now.
+  const cellPool = deps.available
   const dealFill = (): SectorFill => {
     const kind = rng.weighted(['flat', 'ramp', 'texture'] as const, [0.4, 0.2, 0.4])
     // Never deal the ground slot as a flat cell: the background is almost

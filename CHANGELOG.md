@@ -12,6 +12,17 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: segment cells never dealt the curated file patterns
+
+The user noticed some patterns rarely surfacing in batch — a 400-remix
+audit confirmed it structurally: dealFill preferred the tx- procedural
+pool whenever any existed, so 0 of 31 file patterns appeared in 228 dealt
+texture cells. The preference predates the curated library (it guarded
+against the heavy geometry grids); now that the Library's include-toggles
+are the curation surface, cells deal from the whole enabled pool
+(31/31 + 24/24 in the re-run). Same draw counts, so the strict remix
+invariant is untouched; segment-cell picks shift for existing seeds.
+
 ### Changed: staging-review polish, second round
 
 Palette JSON export/import moved behind the Palette section's
