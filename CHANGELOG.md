@@ -12,6 +12,14 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: orb position ships locked at canvas center
+
+DEFAULT_SUBLOCKS.orb.position is now true: a fresh document sits at 0.5/0.5
+and remix keeps it there; compositions drift off-center only when someone
+deliberately unlocks the pair. Migrated pre-v4 documents get the same default
+(freezing whatever position they had); v4 documents that already stored the
+sub-lock keep their own setting.
+
 ### Added: the pattern library manager (header → Library)
 
 Curates what generations deal from: every pattern — 18 built-ins, the

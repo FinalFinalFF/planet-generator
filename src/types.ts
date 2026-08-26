@@ -312,7 +312,11 @@ export type SubLocks = {
 }
 
 export const DEFAULT_SUBLOCKS: SubLocks = {
-  orb: { type: false, size: false, position: false, structure: false },
+  // Position ships locked (2026-08-25 product decision): a fresh document sits
+  // at canvas center and remix keeps it there — compositions drift only when
+  // someone deliberately unlocks the pair. Migrated documents get the same
+  // default, freezing whatever position they already had.
+  orb: { type: false, size: false, position: true, structure: false },
   patterns: { count: false },
   colors: { palette: false },
 }

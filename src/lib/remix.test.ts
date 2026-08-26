@@ -73,7 +73,17 @@ const available = [fakePattern('fake-a'), fakePattern('fake-b')]
 const palette = paletteById(BUILTIN_PALETTES, BUILTIN_PALETTES[0].id)
 const deps = { available, palette }
 
-const FIXTURE: OrbDoc = { ...defaultDoc('fixture-seed'), locks: { ...NO_LOCKS } }
+const NO_SUBLOCKS: SubLocks = {
+  orb: { type: false, size: false, position: false, structure: false },
+  patterns: { count: false },
+  colors: { palette: false },
+}
+
+const FIXTURE: OrbDoc = {
+  ...defaultDoc('fixture-seed'),
+  locks: { ...NO_LOCKS },
+  subLocks: structuredClone(NO_SUBLOCKS),
+}
 const withLocks = (patch: Partial<Locks>): OrbDoc => ({
   ...FIXTURE,
   locks: { ...NO_LOCKS, ...patch },
@@ -439,6 +449,20 @@ describe('sub-locks are absolute', () => {
       const out = remixSection(doc, 'orb', seed, deps)
       expect(out.orb.radius).toBe(doc.orb.radius)
       expect(out.orbType).toBe('segments')
+    }
+  })
+})
+
+describe('position ships locked at canvas center', () => {
+  it('a fresh document is centered with the position sub-lock on', () => {
+    const doc = defaultDoc('fresh')
+    expect(doc.orb.cx).toBe(0.5)
+    expect(doc.orb.cy).toBe(0.5)
+    expect(doc.subLocks.orb.position).toBe(true)
+    for (const seed of ['dp1', 'dp2', 'dp3']) {
+      const out = remix({ ...doc, locks: { ...NO_LOCKS } }, seed, deps)
+      expect(out.orb.cx).toBe(0.5)
+      expect(out.orb.cy).toBe(0.5)
     }
   })
 })
