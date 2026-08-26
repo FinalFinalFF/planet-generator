@@ -678,6 +678,47 @@ export default function App() {
     [batchFormat, batchPngSize, transparent, expandPatterns, notify],
   )
 
+  /**
+   * The whole collection as one clipboard paste: each cell's live node is
+   * serialized exactly like its single-file export (tiles expanded — Figma
+   * drops `<pattern>` fills) and nested as an `<svg x y>` in a near-square
+   * grid. Nested svgs keep their own defs, and per-cell id prefixes already
+   * make those collision-free; Figma flattens each into its own named group.
+   */
+  const copyBatchForFigma = useCallback(
+    async (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => {
+      const present = cells.filter((c) => nodes.get(c.seed))
+      if (present.length === 0) return notify('No rendered cells to copy', true)
+      const w = doc.canvas.width
+      const h = doc.canvas.height
+      const gutter = Math.round(Math.max(w, h) * 0.08)
+      const cols = Math.ceil(Math.sqrt(present.length))
+      const rows = Math.ceil(present.length / cols)
+      const chunks = present.map((cell, i) => {
+        const el = nodes.get(cell.seed)!
+        const x = (i % cols) * (w + gutter)
+        const y = Math.floor(i / cols) * (h + gutter)
+        const inner = serializeSvg(el, { transparent, expandPatterns: true })
+          .replace(/^<\?xml[^>]*\?>\s*/, '')
+        // Name the nested svg after its seed so Figma's group carries it.
+        return inner.replace('<svg ', `<svg x="${x}" y="${y}" id="orb-${cell.seed}" `)
+      })
+      const totalW = cols * w + (cols - 1) * gutter
+      const totalH = rows * h + (rows - 1) * gutter
+      const svg =
+        `<?xml version="1.0" encoding="UTF-8"?>\n` +
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" ` +
+        `viewBox="0 0 ${totalW} ${totalH}">\n${chunks.join('\n')}\n</svg>`
+      try {
+        await navigator.clipboard.writeText(svg)
+        notify(`Copied ${present.length} orbs — paste into Figma with ⌘V`)
+      } catch {
+        notify('Clipboard access was blocked', true)
+      }
+    },
+    [doc.canvas.width, doc.canvas.height, transparent, notify],
+  )
+
   const promoteBatchCell = useCallback(
     (next: OrbDoc) => {
       replace(next)
@@ -863,6 +904,7 @@ export default function App() {
           onClose={() => setBatchOpen(false)}
           onPromote={promoteBatchCell}
           onExportAll={exportBatch}
+          onCopyFigma={copyBatchForFigma}
         />
       )}
 

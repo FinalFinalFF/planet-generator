@@ -12,6 +12,16 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: batch "Copy for Figma" — the whole collection in one paste
+
+Each rendered batch cell is serialized exactly like its single-file export
+(tiles expanded, layers named) and nested as an `<svg x y id="orb-<seed>">` in
+a near-square grid with an 8%-of-canvas gutter, under one root svg. Per-cell
+id prefixes keep every `url(#)` target unique across the combined document —
+verified in-browser on a 9-cell copy — while layer-*name* ids deliberately
+repeat, so every pasted orb carries identically-named layers. Figma flattens
+each nested svg into its own named group.
+
 ### Added: "Copy for Figma" — the clipboard paste path, first-class
 
 Figma parses SVG markup straight off the clipboard into editable layers, and

@@ -28,6 +28,8 @@ export type BatchPanelProps = {
   onClose: () => void
   onPromote: (doc: OrbDoc) => void
   onExportAll: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
+  /** Copy the whole collection to the clipboard as one grid SVG for Figma. */
+  onCopyFigma: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
 }
 
 export type BatchCell = {
@@ -112,6 +114,7 @@ export function BatchPanel({
   onClose,
   onPromote,
   onExportAll,
+  onCopyFigma,
 }: BatchPanelProps) {
   const [cols, setCols] = useState<'3' | '4' | '5'>('3')
   const [batchSeed, setBatchSeed] = useState(newBatchSeed)
@@ -222,6 +225,14 @@ export function BatchPanel({
         <button
           type="button"
           className="btn btn--primary"
+          disabled={busy}
+          onClick={() => onCopyFigma(cells, nodes.current)}
+        >
+          Copy for Figma
+        </button>
+        <button
+          type="button"
+          className="btn"
           disabled={busy}
           onClick={() => onExportAll(cells, nodes.current)}
         >
