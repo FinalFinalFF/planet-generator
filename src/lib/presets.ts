@@ -15,11 +15,12 @@ import { normalizeDoc } from './defaults'
 
 export const BUILTIN_PRESETS: Preset[] = [
   {
-    // Exported from staging 2026-08-25 (seed dusk-pulse-932) — the segments
-    // collage on RSAC Main that seeds every new visitor's first document.
-    id: 'builtin-rsac-collage',
-    name: 'RSAC Collage',
-    savedAt: 1787708763637,
+    // Exported from staging 2026-08-25 (seed dusk-pulse-932) — segments on
+    // RSAC Spectrum, color via the named brand gradients. The default that
+    // seeds every new visitor's first document.
+    id: 'builtin-rsac-collage-spectrum',
+    name: 'RSAC Collage Spectrum',
+    savedAt: 1787711167597,
     builtin: true,
     default: true,
     doc: {
@@ -29,7 +30,7 @@ export const BUILTIN_PRESETS: Preset[] = [
         "width": 1600,
         "height": 1600
       },
-      "paletteId": "rsac-main",
+      "paletteId": "rsac-spectrum",
       "orbType": "segments",
       "colorSource": "gradients",
       "background": {
@@ -70,7 +71,7 @@ export const BUILTIN_PRESETS: Preset[] = [
         "visible": true,
         "cx": 0.5,
         "cy": 0.5,
-        "radius": 0.6040797596797347,
+        "radius": 0.68,
         "gradient": {
           "type": "linear",
           "angle": 180,
