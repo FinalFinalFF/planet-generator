@@ -9,6 +9,7 @@ const KEYS = {
   palettes: 'orbgen.palettes.v1',
   presets: 'orbgen.presets.v1',
   patterns: 'orbgen.patterns.v1',
+  patternPrefs: 'orbgen.patternPrefs.v1',
   ui: 'orbgen.ui.v1',
 } as const
 
@@ -138,6 +139,18 @@ export function saveImportedPatterns(list: StoredPattern[]): string[] {
   }
   return dropped
 }
+
+/**
+ * Library curation: pattern ids excluded from the remix deal and the pickers.
+ * Stored as the exclusion list so newly added patterns (a repo update, a
+ * fresh import) default to included.
+ */
+export function loadDisabledPatterns(): string[] {
+  const list = read<string[]>(KEYS.patternPrefs)
+  return Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string') : []
+}
+
+export const saveDisabledPatterns = (ids: string[]) => write(KEYS.patternPrefs, ids)
 
 export type UiState = {
   zoom: number

@@ -12,6 +12,18 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: the pattern library manager (header → Library)
+
+Curates what generations deal from: every pattern — 18 built-ins, the
+procedural textures, imports — as a thumbnail with an include toggle, plus
+"Add SVGs…" (the global drag-drop's discoverable twin) and delete for
+imports. Stored as an exclusion list so newly added patterns default in.
+Non-destructive on purpose: parsing is never filtered, so existing
+compositions keep rendering excluded patterns and pickers show the in-use one
+as "(excluded)"; only the remix pool and the pickers' offer lists narrow.
+Verified in-browser: exclusions persist, and with the pool cut to a single
+pattern four consecutive Remix Alls dealt only it.
+
 ### Added: batch "Copy for Figma" — the whole collection in one paste
 
 Each cell also carries its own **Figma** button beside Promote, copying that

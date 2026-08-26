@@ -1112,3 +1112,63 @@ textarea {
   outline: 2px solid var(--ff-accent);
   outline-offset: 1px;
 }
+
+/* ---------- the pattern library manager ---------- */
+
+.lib__grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-3);
+  align-content: start;
+}
+
+.lib__cell {
+  margin: 0;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.lib__cell--off .lib__thumb {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
+.lib__thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  background: #f2f2f0;
+}
+
+.lib__thumb--empty {
+  display: grid;
+  place-items: center;
+  color: var(--ff-text-muted);
+}
+
+.lib__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--ff-divider-soft);
+}
+
+.lib__meta .check {
+  flex: 1;
+  min-width: 0;
+}
+
+.lib__name {
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}

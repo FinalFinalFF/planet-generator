@@ -430,6 +430,17 @@ wrong CRC or central-directory offset produces a file that only fails when the
 user opens it. The harness pattern that caught this: build the zip in the browser,
 base64 it into a `<textarea>`, `--dump-dom`, decode, `unzip -t`.
 
+### Library curation
+
+The header's **Library** panel curates the remix deal: every pattern
+(built-in, procedural, imported) has an include toggle, stored as an
+*exclusion* list in `orbgen.patternPrefs.v1` so new patterns default in.
+Excluding is non-destructive by contract: `parsedById` is never filtered, so a
+document wearing an excluded pattern keeps rendering, and the pickers append
+the in-use pattern as "(excluded)". Only `available` (remix's deps) and the
+picker option lists are filtered — pool contents are deps state, which the
+remix invariant explicitly permits. Deleting is real only for imports.
+
 ### Runtime pattern import
 
 Dropped SVGs go through `importPatternSvg` → the same `parsePatternSvg` as

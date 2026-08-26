@@ -120,6 +120,17 @@ function activeBrandId(g: Gradient): string | undefined {
   return m && g.stops.every((s, i) => s.id === `${m[1]}-s${i}`) ? m[1] : undefined
 }
 
+/** A picker keeps showing the pattern its owner currently wears, even when
+ *  the library manager has excluded it from the deal. */
+function withCurrent(
+  options: Array<{ id: string; name: string; imported: boolean }>,
+  id: string | undefined,
+  name: string,
+): Array<{ id: string; name: string; imported: boolean }> {
+  if (!id || options.some((o) => o.id === id)) return options
+  return [...options, { id, name: `${name} (excluded)`, imported: false }]
+}
+
 /* ---------- lock-tree helpers ---------- */
 
 const LAYER_PROPS: LayerPropertyLock[] = ['pattern', 'color', 'scale', 'position', 'rotation']
@@ -437,7 +448,7 @@ function SectorRowEditor({
                 <Select
                   label="Texture"
                   value={fill.patternId}
-                  options={patternOptions.map((o) => ({
+                  options={withCurrent(patternOptions, fill.patternId, parsed?.name ?? fill.patternId).map((o) => ({
                     value: o.id,
                     label: o.imported ? `${o.name} (imported)` : o.name,
                   }))}
@@ -1077,7 +1088,7 @@ function PatternLayerEditor({
       <Select
         label="Pattern"
         value={layer.patternId}
-        options={patternOptions.map((p) => ({
+        options={withCurrent(patternOptions, layer.patternId, parsed?.name ?? layer.name).map((p) => ({
           value: p.id,
           label: p.imported ? `${p.name} (imported)` : p.name,
         }))}

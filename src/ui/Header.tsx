@@ -18,6 +18,8 @@ export function Header({
   onDeletePreset,
   batchOpen,
   onToggleBatch,
+  libraryOpen,
+  onToggleLibrary,
 }: {
   seed: string
   canUndo: boolean
@@ -36,6 +38,8 @@ export function Header({
   onDeletePreset: (id: string) => void
   batchOpen: boolean
   onToggleBatch: () => void
+  libraryOpen: boolean
+  onToggleLibrary: () => void
 }) {
   const [draft, setDraft] = useState(seed)
   const [presetId, setPresetId] = useState('')
@@ -110,6 +114,14 @@ export function Header({
       <div className="header__spacer" />
 
       <div className="header__group">
+        <button
+          type="button"
+          className={`btn${libraryOpen ? ' btn--active' : ''}`}
+          onClick={onToggleLibrary}
+          title="Curate the pattern library — what Remix deals from, plus add and remove"
+        >
+          Library
+        </button>
         <button
           type="button"
           className={`btn${batchOpen ? ' btn--active' : ''}`}

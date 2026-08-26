@@ -25,6 +25,7 @@ import {
   loadPatterns,
   PATTERN_SOURCES,
   rehydrateImported,
+  removeImported,
 } from './lib/patterns/registry'
 import type { ParsedPattern } from './lib/patterns/parse'
 import {
@@ -36,6 +37,7 @@ import {
 } from './lib/export'
 import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
+import { LibraryPanel } from './ui/LibraryPanel'
 import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 
 const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'export'] as const
@@ -84,6 +86,12 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  // Library curation: excluded pattern ids. Non-destructive — a document
+  // already wearing an excluded pattern keeps rendering and re-selecting it.
+  const [disabledPatterns, setDisabledPatterns] = useState<Set<string>>(
+    () => new Set(storage.loadDisabledPatterns()),
+  )
   const [dragging, setDragging] = useState(false)
   // Lifted out of ExportPanel so the E shortcut and the batch export honour it.
   const [transparent, setTransparent] = useState(false)
@@ -213,15 +221,54 @@ export default function App() {
   }, [])
 
   useEffect(() => storage.savePalettes(palettes), [palettes])
+  useEffect(() => storage.saveDisabledPatterns([...disabledPatterns]), [disabledPatterns])
   useEffect(() => storage.savePresets(presets), [presets])
 
   /* ---- remix ---- */
 
-  const available = useMemo(() => [...parsedById.values()], [parsedById])
-  const patternOptions = useMemo(
+  // The remix deal: everything parsed, minus the curated exclusions.
+  const available = useMemo(
+    () => [...parsedById.values()].filter((p) => !disabledPatterns.has(p.id)),
+    [parsedById, disabledPatterns],
+  )
+  const libraryEntries = useMemo(
     () => listPatternOptions(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [patternRev],
+  )
+  const patternOptions = useMemo(
+    () => libraryEntries.filter((o) => !disabledPatterns.has(o.id)),
+    [libraryEntries, disabledPatterns],
+  )
+
+  const onTogglePattern = useCallback((id: string, included: boolean) => {
+    setDisabledPatterns((prev) => {
+      const next = new Set(prev)
+      if (included) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const onRemoveImport = useCallback(
+    (id: string) => {
+      removeImported(id)
+      storage.saveImportedPatterns(listImported())
+      setParsedById((prev) => {
+        const next = new Map(prev)
+        next.delete(id)
+        return next
+      })
+      setDisabledPatterns((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setPatternRev((r) => r + 1)
+      notify('Imported pattern deleted')
+    },
+    [notify],
   )
 
   const doRemix = useCallback(
@@ -843,6 +890,8 @@ export default function App() {
         onDeletePreset={deletePreset}
         batchOpen={batchOpen}
         onToggleBatch={() => setBatchOpen((v) => !v)}
+        libraryOpen={libraryOpen}
+        onToggleLibrary={() => setLibraryOpen((v) => !v)}
       />
 
       <Stage
@@ -904,6 +953,19 @@ export default function App() {
           onCopyFigma: copyForFigma,
         }}
       />
+
+      {libraryOpen && (
+        <LibraryPanel
+          entries={libraryEntries}
+          disabled={disabledPatterns}
+          parsedById={parsedById}
+          onToggle={onTogglePattern}
+          onRemoveImport={onRemoveImport}
+          onAddFiles={(files) => void importSvgFiles(files)}
+          onParsed={(parsed) => ingest([parsed])}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
 
       {batchOpen && (
         <BatchPanel
