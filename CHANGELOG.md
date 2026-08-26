@@ -12,6 +12,17 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: "Copy for Figma" — the clipboard paste path, first-class
+
+Figma parses SVG markup straight off the clipboard into editable layers, and
+the serializer was already built for that import (expanded pattern tiles,
+data-name → id layer names) — but the copy button lived in the Export advanced
+tier and followed the expand-tiles checkbox, which could silently strip
+textures from a paste. "Copy for Figma" is now the Export section's primary
+action: always expands tiles regardless of the checkbox, same serialization as
+the downloads, toast says what to do next. Verified in-browser: the copied
+payload has no <pattern> fills, carries named ids, leaks no data-* attributes.
+
 ### Changed: per-scope disclosure replaces the global Advanced mode (staging review)
 
 The app-wide Simple/Advanced toggle shipped and was rejected the same day —

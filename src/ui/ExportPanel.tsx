@@ -15,6 +15,8 @@ export type ExportPanelProps = {
   onExportSvg: (transparent: boolean) => void
   onExportPng: (longEdge: number, transparent: boolean) => void
   onCopySvg: (transparent: boolean) => void
+  /** Clipboard copy with pattern tiles always expanded — the Figma paste path. */
+  onCopyFigma: (transparent: boolean) => void
 }
 
 const SCALES = [1, 2, 4]
@@ -32,6 +34,7 @@ export function ExportPanel({
   onExportSvg,
   onExportPng,
   onCopySvg,
+  onCopyFigma,
 }: ExportPanelProps) {
   const advanced = useTier() === 'advanced'
   const [custom, setCustom] = useState(3000)
@@ -78,6 +81,19 @@ export function ExportPanel({
       <button
         type="button"
         className="btn btn--primary btn--block"
+        disabled={busy}
+        onClick={() => onCopyFigma(transparent)}
+      >
+        Copy for Figma
+      </button>
+      <div className="note">
+        Copies the artwork as SVG — paste straight onto a Figma canvas (⌘V) as named,
+        editable layers. Pattern tiles are always expanded here, since Figma drops
+        SVG <code>&lt;pattern&gt;</code> fills.
+      </div>
+      <button
+        type="button"
+        className="btn btn--block"
         disabled={busy}
         onClick={() => onExportSvg(transparent)}
       >

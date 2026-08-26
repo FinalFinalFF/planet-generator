@@ -569,6 +569,29 @@ export default function App() {
     [notify, serializeOpts],
   )
 
+  /**
+   * The paste-into-Figma path: Figma parses SVG markup straight off the
+   * clipboard into editable layers. Always expands pattern tiles regardless of
+   * the export checkbox — Figma drops `<pattern>` fills, so an unexpanded copy
+   * would silently lose its texture — and rides on the same serialization the
+   * downloads use (named layers included), so what pastes is what previews.
+   */
+  const copyForFigma = useCallback(
+    async (asTransparent: boolean) => {
+      const el = svgRef.current
+      if (!el) return
+      try {
+        await navigator.clipboard.writeText(
+          serializeSvg(el, { transparent: asTransparent, expandPatterns: true, onNote: notify }),
+        )
+        notify('Copied — paste into Figma with ⌘V')
+      } catch {
+        notify('Clipboard access was blocked', true)
+      }
+    },
+    [notify],
+  )
+
   const exportPng = useCallback(
     async (longEdge: number, transparent: boolean) => {
       const el = svgRef.current
@@ -821,6 +844,7 @@ export default function App() {
           onExportSvg: exportSvg,
           onExportPng: exportPng,
           onCopySvg: copySvg,
+          onCopyFigma: copyForFigma,
         }}
       />
 
