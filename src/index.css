@@ -242,6 +242,10 @@ textarea {
 
 .sidebar {
   grid-area: sidebar;
+  /* The containing block for absolutely-positioned descendants (the visually
+     hidden file inputs): without this they anchor to the page and extend the
+     document below the app — the phantom page scrollbar. */
+  position: relative;
   overflow-y: auto;
   background: var(--ff-surface);
   border-left: 1px solid var(--ff-divider);
