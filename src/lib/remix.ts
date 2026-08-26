@@ -37,6 +37,7 @@ import {
   type Layer,
   type LockSection,
   type Locks,
+  type MotionSpec,
   type Palette,
   type PatternLayer,
   type OrbDoc,
@@ -57,6 +58,8 @@ export type RemixDeps = {
 /** The fixed candidate widths. Selection uses a prefix; draws always run full. */
 export const MAX_PATTERN_LAYERS = 3
 export const MAX_SECTOR_CELLS = 3
+/** Cycle identities per slot (phase 2); variant deals already run at this width. */
+export const MAX_CYCLE_VARIANTS = 4
 
 /* ---------- lock helpers ---------- */
 
@@ -608,6 +611,40 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
 
   const rolledBelow = rng.bool(0.3)
 
+  // --- motion candidate ---
+  // Values only: `enabled` and each channel's `on` flag are user state remix
+  // never flips (flat citizenship). Phase-2 channels (traverse, cycle) draw
+  // their parameters and their variant deals NOW so implementing them later
+  // does not shift the stream again.
+  const periodRoll = rng.pick([8, 12, 16, 20, 24])
+  const orbitTurnsRoll = rng.pick([1, 1, 2, 3]) * (rng.bool() ? 1 : -1)
+  const driftTurnsRoll = rng.pick([1, 1, 2]) * (rng.bool() ? 1 : -1)
+  const spanStart = rng.int(0, 6)
+  const spanLen = rng.int(1, 3)
+  const traverseRev = rng.bool()
+  const stepsRoll = rng.pick([2, 3, 4] as const)
+  // Cycle phase draws (per cell slot) and variant deals — drawn and, in
+  // phase 1, discarded; the width constants make phase 2 a pure selection.
+  for (let i = 0; i < MAX_SECTOR_CELLS * 2; i++) rng.float(0, 1)
+  for (let i = 0; i < MAX_SECTOR_CELLS * 2 * (MAX_CYCLE_VARIANTS - 1); i++) dealFill()
+  if (deps.available.length > 0) {
+    for (let i = 0; i < MAX_PATTERN_LAYERS * (MAX_CYCLE_VARIANTS - 1); i++) {
+      remixPatternLayer(rng, deps, undefined, locks.colors)
+    }
+  }
+  const motionCandidate: MotionSpec = {
+    ...doc.motion,
+    period: periodRoll,
+    orbit: { ...doc.motion.orbit, turns: orbitTurnsRoll },
+    drift: { ...doc.motion.drift, turns: driftTurnsRoll },
+    traverse: {
+      ...doc.motion.traverse,
+      span: [spanStart, Math.min(7, spanStart + spanLen)],
+      reverse: traverseRev,
+    },
+    cycle: { ...doc.motion.cycle, steps: stepsRoll },
+  }
+
   /*
    * SELECT PHASE — pure choices between candidates and incoming values.
    * Nothing below consumes a draw.
@@ -710,6 +747,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const selectedPatterns = locks.patterns ? prevPatterns : patterns
   const shading = locks.shading ? (prevShading ?? null) : shadingCandidate
   const accents = locks.accents ? (prevAccents ?? null) : accentsCandidate
+  const motion = locks.motion ? doc.motion : motionCandidate
 
   /*
    * --- stack order ---
@@ -771,7 +809,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     }
   }
 
-  return { ...doc, seed, orbType, background, orb, layers }
+  return { ...doc, seed, orbType, background, orb, layers, motion }
 }
 
 /**
@@ -800,6 +838,7 @@ export function remixSection(
     patterns: true,
     shading: true,
     accents: true,
+    motion: true,
     [section]: false,
   }
   const out = remix({ ...doc, locks: inverted }, seed, deps)

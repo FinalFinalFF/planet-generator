@@ -281,7 +281,7 @@ export type Palette = {
   builtin?: boolean
 }
 
-export const LOCK_SECTIONS = ['colors', 'orb', 'patterns', 'shading', 'accents', 'background'] as const
+export const LOCK_SECTIONS = ['colors', 'orb', 'patterns', 'shading', 'accents', 'background', 'motion'] as const
 export type LockSection = (typeof LOCK_SECTIONS)[number]
 export type Locks = Record<LockSection, boolean>
 
@@ -321,6 +321,32 @@ export const DEFAULT_SUBLOCKS: SubLocks = {
   colors: { palette: false },
 }
 
+/**
+ * Motion — the time dimension (see lib/motion.ts). A standing property of the
+ * document, not a mode: any composition can play, and the still is frame zero
+ * of its own loop. `enabled` and the per-channel `on` flags are **user-only**
+ * state remix never flips (the `flat` citizenship); remix deals the *values*
+ * (period, turns, spans) as fixed-width candidates like everything else.
+ * Every channel's frequency is an integer multiple of 1/period, so the loop
+ * closes exactly: motionAt(doc, 0) ≡ motionAt(doc, period).
+ *
+ * Phase 1 implements orbit + drift; traverse and cycle fields ship now so the
+ * doc version bumps once and their draws already stabilize the stream.
+ */
+export type MotionSpec = {
+  enabled: boolean
+  /** Loop period in whole seconds, 4–60. */
+  period: number
+  /** Accents revolve about the orb center; integer revolutions per loop. */
+  orbit: { on: boolean; turns: number }
+  /** The composition's one slow rotation (segments group / pattern layers). */
+  drift: { on: boolean; turns: number }
+  /** Color travels a span of the chained brand spectrum, ping-pong. Phase 2. */
+  traverse: { on: boolean; span: [number, number]; reverse: boolean }
+  /** Content crossfades between dealt identities on the beat. Phase 2. */
+  cycle: { on: boolean; steps: 2 | 3 | 4 }
+}
+
 export type OrbDoc = {
   version: number
   seed: string
@@ -333,6 +359,7 @@ export type OrbDoc = {
   layers: Layer[]
   locks: Locks
   subLocks: SubLocks
+  motion: MotionSpec
   /**
    * Where remix gets its color from: `palette` deals slot ramps (the default),
    * `gradients` selects one of the named RSAC brand gradients instead at every
@@ -386,11 +413,10 @@ export type Preset = {
 /**
  * v4 is the mode-first restructure: `orbType` replaces `orb.mode` (sliced
  * retired), `subLocks` absorbs `lockPatternCount`, per-object property locks,
- * and `colorSource`. The old "Orb style" recipes are gone with the dropdown —
- * shaded-sphere is "Color type + shading on", overlap-bloom is a documented
- * Pattern-type recipe.
+ * and `colorSource`. The old "Orb style" recipes are gone with the dropdown.
+ * v5 adds `motion` and its section lock.
  */
-export const DOC_VERSION = 4
+export const DOC_VERSION = 5
 
 /** A pattern tile at scale 1 spans this fraction of the orb diameter. */
 export const TILE_BASE_FRACTION = 0.5

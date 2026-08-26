@@ -14,6 +14,7 @@ import {
   type Orb,
   type OrbDoc,
   type OrbType,
+  type MotionSpec,
   type SectorConfig,
   type ShadingLayer,
   type SubLocks,
@@ -69,6 +70,15 @@ export const DEFAULT_SECTORS: SectorConfig = {
     { kind: 'flat', color: ref(0) },
     { kind: 'flat', color: ref(3) },
   ],
+}
+
+export const DEFAULT_MOTION: MotionSpec = {
+  enabled: false,
+  period: 16,
+  orbit: { on: true, turns: 1 },
+  drift: { on: true, turns: 1 },
+  traverse: { on: false, span: [0, 4], reverse: false },
+  cycle: { on: false, steps: 3 },
 }
 
 /**
@@ -324,8 +334,10 @@ export function defaultDoc(seed: string): OrbDoc {
       shading: false,
       accents: false,
       background: false,
+      motion: false,
     },
     subLocks: structuredClone(DEFAULT_SUBLOCKS),
+    motion: structuredClone(DEFAULT_MOTION),
   }
 }
 
@@ -420,14 +432,28 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
   }
 
   const { planet: legacyPlanetLock, ...locks } = doc.locks ?? {}
+  const motionIn = (doc as { motion?: Partial<MotionSpec> }).motion
   const out = {
     ...doc,
     version: DOC_VERSION,
     orbType,
     orb,
     layers,
-    locks: { ...locks, orb: locks.orb ?? legacyPlanetLock ?? false } as Locks,
+    locks: {
+      ...locks,
+      orb: locks.orb ?? legacyPlanetLock ?? false,
+      motion: locks.motion ?? false,
+    } as Locks,
     subLocks,
+    // v5: motion defaults off; a partial spec merges structurally.
+    motion: {
+      ...structuredClone(DEFAULT_MOTION),
+      ...(motionIn ?? {}),
+      orbit: { ...DEFAULT_MOTION.orbit, ...(motionIn?.orbit ?? {}) },
+      drift: { ...DEFAULT_MOTION.drift, ...(motionIn?.drift ?? {}) },
+      traverse: { ...DEFAULT_MOTION.traverse, ...(motionIn?.traverse ?? {}) },
+      cycle: { ...DEFAULT_MOTION.cycle, ...(motionIn?.cycle ?? {}) },
+    },
     colorSource: doc.colorSource ?? 'palette',
     flat: doc.flat ?? false,
     solidFills: doc.solidFills ?? false,

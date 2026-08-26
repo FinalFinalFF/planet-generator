@@ -430,6 +430,35 @@ wrong CRC or central-directory offset produces a file that only fails when the
 user opens it. The harness pattern that caught this: build the zip in the browser,
 base64 it into a `<textarea>`, `--dump-dom`, decode, `unzip -t`.
 
+### Motion (v5, phase 1)
+
+Motion is a **dimension, not a mode**: `doc.motion` (MotionSpec) is standing
+state like `flat` — any composition can play, and the still is frame zero.
+One pure function is the whole design: `motionAt(spec, t)` in `lib/motion.ts`
+maps the spec and a time to every animated value; the editor's rAF loop and
+the video exporter both consume it, and the exporter pushes every frame
+through the same `serializeSvg → rasterizeSvg` path as PNG export — preview ≡
+export by construction. Never animate with free-running CSS/SMIL in the
+editor: a CSS timeline cannot be deterministically seeked through
+rasterization.
+
+Phase 1 ships **Orbit** (accents revolve; `data-motion="orbit"` markers) and
+**Drift** (the composition's one rotation; `data-motion="drift"` on the
+segments wrapper and pattern-layer groups). Rotation centers ride in
+`data-motion-center`; direction alternates by node order. All motion is
+integer turns per period, so the loop closes exactly — asserted in tests.
+`enabled` and per-channel `on` flags are user-only (remix never flips them);
+remix deals the values under the fixed-width rules, `locks.motion` is the
+section lock, and phase-2 channels (traverse, cycle) already draw their
+parameters and variant deals so implementing them will not shift the stream.
+The playhead is ephemeral UI state — never in the doc, never in undo.
+
+Video export: ffmpeg.wasm (~32 MB wasm, lazily loaded, self-hosted through
+the bundler). `optimizeDeps.exclude` for `@ffmpeg/*` is load-bearing — dep
+pre-bundling breaks the package's relative class-worker URL and `load()`
+hangs forever. Transparency is forced off (yuv420p) and dimensions snapped
+even. Copy-for-Figma and the SVG/PNG exports ship the t=0 still on purpose.
+
 ### Library curation
 
 The header's **Library** panel curates the remix deal: every pattern

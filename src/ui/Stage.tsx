@@ -8,6 +8,7 @@ export function Stage({
   fit,
   onZoomChange,
   onFitChange,
+  transport,
   children,
 }: {
   width: number
@@ -16,6 +17,8 @@ export function Stage({
   fit: boolean
   onZoomChange: (z: number) => void
   onFitChange: (fit: boolean) => void
+  /** The motion transport (play/scrub), rendered bottom-center when present. */
+  transport?: ReactNode
   children: ReactNode
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -72,6 +75,8 @@ export function Stage({
           100%
         </button>
       </div>
+
+      {transport && <div className="stage__transport">{transport}</div>}
 
       <div className="stage__meta">
         {width} × {height}

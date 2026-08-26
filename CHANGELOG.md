@@ -12,6 +12,26 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: Motion phase 1 — orbit, drift, and the looping video export
+
+Per the motion proposal (approved on its leans): motion is a dimension, not
+a mode — doc.motion joins flat/solidFills as standing state, the still is
+frame zero, and DOC_VERSION bumps to 5. One pure function motionAt(spec,t)
+drives both the rAF preview and the frame-sampled video export (same
+serialize→rasterize path as PNG), so the loop you watch is the loop you
+ship. Phase 1 channels: Orbit (accents revolve about the orb center,
+alternating directions) and Drift (segments collage / pattern layers turn as
+groups — rotation-invariant circle clips make this a pure transform).
+Integer turns per period ⇒ exact loop closure, tested. Remix deals the
+values but never flips the user-only enable flags; locks.motion is the new
+section lock; traverse/cycle parameters and variant deals already draw so
+phase 2 is a pure selection. Transport (play/scrub, Space) lives on the
+stage; the playhead is ephemeral. MP4/WebM loop export via self-hosted
+ffmpeg.wasm — verified end-to-end in dev AND the production build (the
+optimizeDeps.exclude for @ffmpeg/* is load-bearing; pre-bundling 404s the
+class worker and load() hangs). 59 tests passing, motion-lock sabotaged
+once.
+
 ### Fixed: segment cells never dealt the curated file patterns
 
 The user noticed some patterns rarely surfacing in batch — a 400-remix

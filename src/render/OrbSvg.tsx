@@ -342,8 +342,12 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
   return (
     <Fragment>
       {defs.length > 0 && <defs>{defs}</defs>}
-      <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sector cells">{cells}</g>
-      {textured}
+      {/* One wrapper so Drift turns the collage as a single object. The orb
+          clip is a circle about the rotation center — rotation-invariant. */}
+      <g data-name="Segments" data-motion="drift" data-motion-center={`${n(cx)} ${n(cy)}`}>
+        <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sector cells">{cells}</g>
+        {textured}
+      </g>
     </Fragment>
   )
 }
@@ -442,6 +446,8 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
           opacity={n(layer.opacity, 4)}
           style={blendStyle(layer.blend)}
           data-name={`Pattern ${layer.name}`}
+          data-motion="drift"
+          data-motion-center={`${n(cx)} ${n(cy)}`}
         >
           <g mask={useMask ? `url(#${maskId})` : undefined}>
             <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
@@ -473,6 +479,8 @@ function PatternLayerView({ layer, ctx }: { layer: PatternLayer; ctx: Ctx }) {
         opacity={n(layer.opacity, 4)}
         style={blendStyle(layer.blend)}
         data-name={`Pattern ${layer.name}`}
+        data-motion="drift"
+        data-motion-center={`${n(cx)} ${n(cy)}`}
       >
         <rect
           x={n(cx - r)}
@@ -619,6 +627,8 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
           <path
             key={ring.id}
             data-name="Ring"
+            data-motion="orbit"
+            data-motion-center={`${n(cx)} ${n(cy)}`}
             d={arcPath(cx, cy, rr, Math.max(1, rr * clamp(ring.tilt, 0.02, 1)), ring.start, ring.sweep, ring.rotation)}
             fill="none"
             stroke={resolveColor(ring.color, palette)}
@@ -638,6 +648,8 @@ function AccentLayerView({ layer, ctx }: { layer: AccentLayer; ctx: Ctx }) {
           <circle
             key={sat.id}
             data-name="Satellite"
+            data-motion="orbit"
+            data-motion-center={`${n(cx)} ${n(cy)}`}
             cx={n(p.x)}
             cy={n(p.y)}
             r={n(sr)}

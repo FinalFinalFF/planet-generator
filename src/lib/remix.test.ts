@@ -67,6 +67,7 @@ const NO_LOCKS: Locks = {
   patterns: false,
   shading: false,
   accents: false,
+  motion: false,
 }
 
 const available = [fakePattern('fake-a'), fakePattern('fake-b')]
@@ -634,7 +635,9 @@ describe('v3 → v4 migration', () => {
     expect('lockPatternCount' in out).toBe(false)
     expect('mode' in out.orb).toBe(false)
     expect('slices' in out.orb).toBe(false)
-    expect(out.version).toBe(4)
+    expect(out.version).toBe(5)
+    expect(out.motion.enabled).toBe(false)
+    expect(out.locks.motion).toBe(false)
     expect(out.colorSource).toBe('palette')
   })
 })
@@ -670,5 +673,53 @@ describe('applyOrbType respects the lock tree', () => {
       patterns(locked).map((l) => l.visible),
     )
     expect(out.skipped).toContain('patterns')
+  })
+})
+
+/*
+ * Motion (v5): the time dimension holds the same contracts — the loop closes
+ * exactly, remix deals values but never flips the user-only enable flags, and
+ * the section lock is absolute.
+ */
+describe('motion', () => {
+  it('the loop closes: motionAt(spec, 0) ≡ motionAt(spec, period)', async () => {
+    const { motionAt } = await import('./motion')
+    for (const seed of SEEDS) {
+      const spec = { ...remix(FIXTURE, seed, deps).motion, enabled: true }
+      expect(motionAt(spec, 0)).toEqual(motionAt(spec, spec.period))
+      // and mid-loop is genuinely in motion
+      const mid = motionAt(spec, spec.period / 3)
+      expect(Math.abs(mid.driftAngle) + Math.abs(mid.orbitAngle)).toBeGreaterThan(0)
+    }
+  })
+
+  it('remix deals motion values but never flips enabled or channel on-flags', () => {
+    const off = FIXTURE
+    const on: OrbDoc = {
+      ...FIXTURE,
+      motion: { ...FIXTURE.motion, enabled: true, traverse: { ...FIXTURE.motion.traverse, on: true } },
+    }
+    const periods = new Set<number>()
+    for (const seed of SEEDS) {
+      const a = remix(off, seed, deps)
+      expect(a.motion.enabled).toBe(false)
+      const b = remix(on, seed, deps)
+      expect(b.motion.enabled).toBe(true)
+      expect(b.motion.traverse.on).toBe(true)
+      expect(b.motion.orbit.on).toBe(FIXTURE.motion.orbit.on)
+      periods.add(a.motion.period)
+    }
+    expect(periods.size).toBeGreaterThan(1) // values really are dealt
+  })
+
+  it('locks.motion is absolute, and toggling it shifts nothing else', () => {
+    const locked = withLocks({ motion: true })
+    for (const seed of SEEDS) {
+      const out = remix(locked, seed, deps)
+      expect(json(out.motion)).toBe(json(FIXTURE.motion))
+      // strict stream independence: everything else byte-identical
+      const base = remix(FIXTURE, seed, deps)
+      expect(json({ ...out, motion: 0, locks: 0 })).toBe(json({ ...base, motion: 0, locks: 0 }))
+    }
   })
 })

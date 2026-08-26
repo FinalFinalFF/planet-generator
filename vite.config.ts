@@ -12,6 +12,10 @@ export default defineConfig({
   // on the live site 404s.
   base: '/',
   plugins: [react()],
+  // @ffmpeg/ffmpeg spawns its class worker via a relative import.meta.url;
+  // dep pre-bundling rewrites the package into .vite/deps where that URL
+  // 404s and load() hangs forever. Excluding it keeps the package on disk.
+  optimizeDeps: { exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'] },
   server: { port: 5173 },
   build: { outDir: 'dist', assetsInlineLimit: 0 },
 })

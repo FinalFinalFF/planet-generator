@@ -40,15 +40,17 @@ import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
 import { LibraryPanel } from './ui/LibraryPanel'
 import { BUILTIN_PRESETS, defaultPresetDoc } from './lib/presets'
+import { applyMotion } from './lib/motion'
 import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 
-const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'export'] as const
+const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'motion', 'export'] as const
 
 const DEFAULT_OPEN: Record<string, boolean> = {
   orb: true,
   palette: true,
   accents: false,
   canvas: false,
+  motion: false,
   export: false,
 }
 
@@ -110,6 +112,15 @@ export default function App() {
   const [patternRev, setPatternRev] = useState(0)
   const svgRef = useRef<SVGSVGElement>(null)
 
+  /* ---- motion playback: the playhead is ephemeral UI state, never in the
+     doc, never in undo. The rAF loop writes motionAt() onto the live SVG;
+     the scrubber and clock update by ref so playback never re-renders. ---- */
+  const [playing, setPlaying] = useState(false)
+  const playheadRef = useRef(0)
+  const scrubRef = useRef<HTMLInputElement>(null)
+  const clockRef = useRef<HTMLSpanElement>(null)
+  const [videoProgress, setVideoProgress] = useState<string | null>(null)
+
   const notify = useCallback((text: string, error = false) => {
     setToast({ text, error })
     window.setTimeout(() => setToast(null), error ? 5200 : 2400)
@@ -118,6 +129,47 @@ export default function App() {
   const update = useCallback(
     (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => rawUpdate(recipe, { coalesce }),
     [rawUpdate],
+  )
+
+  useEffect(() => {
+    if (!doc.motion.enabled) setPlaying(false)
+  }, [doc.motion.enabled])
+
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const reflect = () => {
+      const frac = doc.motion.period > 0 ? playheadRef.current / doc.motion.period : 0
+      if (scrubRef.current) scrubRef.current.value = String(Math.round(frac * 1000))
+      if (clockRef.current) clockRef.current.textContent = `${Math.abs(playheadRef.current).toFixed(1)}s`
+    }
+    if (!playing || !doc.motion.enabled) {
+      // Keep the paused frame applied across re-renders (edits replace nodes).
+      applyMotion(el, doc.motion, doc.motion.enabled ? playheadRef.current : 0)
+      reflect()
+      return
+    }
+    let raf = 0
+    let last = performance.now()
+    const step = (now: number) => {
+      playheadRef.current = (playheadRef.current + (now - last) / 1000) % doc.motion.period
+      last = now
+      applyMotion(el, doc.motion, playheadRef.current)
+      reflect()
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [playing, doc])
+
+  const scrubTo = useCallback(
+    (frac: number) => {
+      playheadRef.current = frac * doc.motion.period
+      const el = svgRef.current
+      if (el) applyMotion(el, doc.motion, playheadRef.current)
+      if (clockRef.current) clockRef.current.textContent = `${Math.abs(playheadRef.current).toFixed(1)}s`
+    },
+    [doc.motion],
   )
 
   /* ---- pattern loading ---- */
@@ -728,6 +780,70 @@ export default function App() {
     [doc.canvas.height, doc.canvas.width, doc.seed, notify],
   )
 
+  /**
+   * The looping video export: step the playhead through period × fps frames,
+   * push each through the same serialize → rasterize path the PNG export
+   * uses (preview ≡ export by construction), and encode with ffmpeg.wasm —
+   * loaded lazily, self-hosted through the bundler. Transparency is forced
+   * off (yuv420p has no alpha) and dimensions snapped even for H.264.
+   */
+  const exportVideo = useCallback(
+    async (format: 'mp4' | 'webm', fps: number, longEdge: number) => {
+      const el = svgRef.current
+      if (!el) return
+      const spec = doc.motion
+      if (!spec.enabled) return notify('Turn motion on first (Motion section)', true)
+      setBusy(true)
+      const wasPlaying = playing
+      setPlaying(false)
+      const frames = Math.max(1, Math.round(spec.period * fps))
+      try {
+        setVideoProgress('Loading encoder…')
+        const [{ FFmpeg }, core, wasm] = await Promise.all([
+          import('@ffmpeg/ffmpeg'),
+          import('@ffmpeg/core?url'),
+          import('@ffmpeg/core/wasm?url'),
+        ])
+        const ff = new FFmpeg()
+        await ff.load({ coreURL: core.default, wasmURL: wasm.default })
+        for (let i = 0; i < frames; i++) {
+          applyMotion(el, spec, i / fps)
+          const text = serializeSvg(el, { transparent: false, expandPatterns: false })
+          const png = await rasterizeSvg(text, doc.canvas.width, doc.canvas.height, longEdge, false)
+          await ff.writeFile(
+            `f${String(i).padStart(4, '0')}.png`,
+            new Uint8Array(await png.arrayBuffer()),
+          )
+          if (i % 5 === 0 || i === frames - 1) setVideoProgress(`Rendering frame ${i + 1}/${frames}`)
+        }
+        setVideoProgress('Encoding…')
+        const out = `out.${format}`
+        const even = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']
+        await ff.exec(
+          format === 'mp4'
+            ? ['-framerate', String(fps), '-i', 'f%04d.png', ...even, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]
+            : ['-framerate', String(fps), '-i', 'f%04d.png', ...even, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34', '-pix_fmt', 'yuv420p', out],
+        )
+        const data = await ff.readFile(out)
+        const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(data as string)
+        const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+        downloadBlob(
+          new Blob([buf], { type: format === 'mp4' ? 'video/mp4' : 'video/webm' }),
+          orbFilename(doc.seed, format, `loop-${spec.period}s`),
+        )
+        notify(`Looping ${format.toUpperCase()} exported — ${spec.period}s at ${fps}fps`)
+      } catch (err) {
+        notify(err instanceof Error ? err.message : 'Video export failed', true)
+      } finally {
+        applyMotion(el, spec, playheadRef.current)
+        setVideoProgress(null)
+        setBusy(false)
+        setPlaying(wasPlaying)
+      }
+    },
+    [doc.motion, doc.canvas.width, doc.canvas.height, doc.seed, playing, notify],
+  )
+
   /* ---- batch ---- */
 
   const [batchFormat, setBatchFormat] = useState<'svg' | 'png' | 'both'>('svg')
@@ -869,6 +985,13 @@ export default function App() {
         return
       }
       if (mod) return
+      if (e.key === ' ') {
+        if (doc.motion.enabled) {
+          e.preventDefault()
+          setPlaying((v) => !v)
+        }
+        return
+      }
       const key = e.key.toLowerCase()
       if (key === 'r') {
         e.preventDefault()
@@ -887,7 +1010,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doRemix, doRemixAll, doShuffleColors, exportSvg, transparent, undo, redo])
+  }, [doRemix, doRemixAll, doShuffleColors, exportSvg, transparent, undo, redo, doc.motion.enabled])
 
   /* ---- drag and drop pattern import ---- */
 
@@ -967,6 +1090,33 @@ export default function App() {
         fit={ui.fitToStage}
         onZoomChange={(zoom) => setUi((u) => ({ ...u, zoom }))}
         onFitChange={(fitToStage) => setUi((u) => ({ ...u, fitToStage }))}
+        transport={
+          doc.motion.enabled ? (
+            <>
+              <button
+                type="button"
+                className="btn btn--icon"
+                title={playing ? 'Pause (Space)' : 'Play (Space)'}
+                aria-label={playing ? 'Pause' : 'Play'}
+                onClick={() => setPlaying((v) => !v)}
+              >
+                {playing ? '❚❚' : '►'}
+              </button>
+              <input
+                ref={scrubRef}
+                className="slider"
+                type="range"
+                min={0}
+                max={1000}
+                defaultValue={0}
+                aria-label="Playhead"
+                onInput={(e) => scrubTo(Number((e.target as HTMLInputElement).value) / 1000)}
+              />
+              <span ref={clockRef} className="stage__zoom">0.0s</span>
+              <span className="stage__zoom">/ {doc.motion.period}s</span>
+            </>
+          ) : undefined
+        }
       >
         <OrbSvg
           doc={doc}
@@ -1017,6 +1167,9 @@ export default function App() {
           onExportPng: exportPng,
           onCopySvg: copySvg,
           onCopyFigma: copyForFigma,
+          motionEnabled: doc.motion.enabled,
+          videoProgress,
+          onExportVideo: exportVideo,
         }}
       />
 

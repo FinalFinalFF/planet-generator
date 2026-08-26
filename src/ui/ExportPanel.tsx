@@ -17,6 +17,10 @@ export type ExportPanelProps = {
   onCopySvg: (transparent: boolean) => void
   /** Clipboard copy with pattern tiles always expanded — the Figma paste path. */
   onCopyFigma: (transparent: boolean) => void
+  motionEnabled: boolean
+  /** Progress line while a video renders, or null. */
+  videoProgress: string | null
+  onExportVideo: (format: 'mp4' | 'webm', fps: number, longEdge: number) => void
 }
 
 const SCALES = [1, 2, 4]
@@ -35,9 +39,14 @@ export function ExportPanel({
   onExportPng,
   onCopySvg,
   onCopyFigma,
+  motionEnabled,
+  videoProgress,
+  onExportVideo,
 }: ExportPanelProps) {
   const advanced = useTier() === 'advanced'
   const [custom, setCustom] = useState(3000)
+  const [fps, setFps] = useState(30)
+  const [videoEdge, setVideoEdge] = useState(1080)
   const longEdge = Math.max(canvas.width, canvas.height)
 
   const dims = (target: number) => {
@@ -110,6 +119,39 @@ export function ExportPanel({
         >
           Download PNG ({dims(longEdge * 2)})
         </button>
+      )}
+      {motionEnabled && (
+        <>
+          <hr className="divider" />
+          <div className="eyebrow">Video — seamless loop</div>
+          <button
+            type="button"
+            className="btn btn--primary btn--block"
+            disabled={busy}
+            onClick={() => onExportVideo('mp4', fps, videoEdge)}
+          >
+            {videoProgress ?? 'Export MP4 loop'}
+          </button>
+          <div className="note">
+            Renders every frame through the same pipeline as the PNG export, so the loop you
+            watched is the loop you get. The encoder loads on first use (~25&nbsp;MB, once).
+            Motion never reaches the SVG/Figma exports — those are the still at frame zero.
+          </div>
+          <Adv>
+            <button
+              type="button"
+              className="btn btn--block"
+              disabled={busy}
+              onClick={() => onExportVideo('webm', fps, videoEdge)}
+            >
+              {videoProgress ?? 'Export WebM loop'}
+            </button>
+            <div className="grid2">
+              <NumberField label="Frame rate" value={fps} min={12} max={60} onChange={setFps} />
+              <NumberField label="Long edge px" value={videoEdge} min={240} max={2160} onChange={setVideoEdge} />
+            </div>
+          </Adv>
+        </>
       )}
       <Adv>
         <button

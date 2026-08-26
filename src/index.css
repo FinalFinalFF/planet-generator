@@ -1193,3 +1193,22 @@ textarea {
   color: var(--ff-text);
   text-decoration-color: var(--ff-accent);
 }
+
+/* The motion transport: play/scrub, floating bottom-center of the stage. */
+.stage__transport {
+  position: absolute;
+  bottom: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: min(420px, 60%);
+  padding: 5px 10px;
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-divider);
+}
+
+.stage__transport .slider {
+  flex: 1;
+}

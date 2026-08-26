@@ -1958,14 +1958,107 @@ function AccentsSection(props: SidebarProps) {
   )
 }
 
-/* ---------- 05 Export ---------- */
+/* ---------- 05 Motion ---------- */
+
+function MotionSection(props: SidebarProps) {
+  const { doc, open, onToggleSection, update, onRandomizeSection } = props
+  const [more, setMore] = useState(false)
+  const m = doc.motion
+  const patchMotion = (patch: Partial<typeof m>, coalesce?: string) =>
+    update((d) => ({ ...d, motion: { ...d.motion, ...patch } }), coalesce)
+  const channels = [m.orbit.on && 'orbit', m.drift.on && 'drift'].filter(Boolean).join('+')
+
+  return (
+    <Section
+      num="05"
+      title="Motion"
+      hint={m.enabled ? `${m.period}s · ${channels || 'still'}` : 'off'}
+      open={open.motion}
+      onToggle={() => onToggleSection('motion')}
+      lock={{
+        section: 'motion',
+        on: doc.locks.motion,
+        onToggle: (on) => update((d) => ({ ...d, locks: { ...d.locks, motion: on } })),
+      }}
+      randomize={{
+        label: 'Randomize the motion only',
+        onRandomize: () => onRandomizeSection('motion'),
+        disabled: doc.locks.motion,
+      }}
+      more={{ on: more, onToggle: setMore }}
+    >
+      <div className="chiprow">
+        <ConstraintChip
+          label="Motion on"
+          on={m.enabled}
+          title="The time dimension: the composition plays as a seamless loop. The still exports are always frame zero — turning this off changes nothing about the document."
+          onToggle={(enabled) => patchMotion({ enabled })}
+        />
+      </div>
+      {m.enabled && (
+        <>
+          <Slider
+            label="Loop period"
+            value={m.period}
+            min={4}
+            max={60}
+            step={1}
+            suffix="s"
+            onChange={(period) => patchMotion({ period: Math.round(period) }, 'mo-period')}
+          />
+          <div className="note">
+            Play with the transport under the canvas (Space). Every channel returns home at
+            the end of the loop.
+          </div>
+          <hr className="divider" />
+          <Check
+            label="Orbit — accents revolve"
+            checked={m.orbit.on}
+            onChange={(on) => patchMotion({ orbit: { ...m.orbit, on } })}
+          />
+          <Adv>
+            <Slider
+              label="Orbit turns per loop"
+              value={m.orbit.turns}
+              min={-3}
+              max={3}
+              step={1}
+              onChange={(turns) => patchMotion({ orbit: { ...m.orbit, turns: turns || 1 } }, 'mo-ot')}
+            />
+          </Adv>
+          <Check
+            label="Drift — the composition turns slowly"
+            checked={m.drift.on}
+            onChange={(on) => patchMotion({ drift: { ...m.drift, on } })}
+          />
+          <Adv>
+            <Slider
+              label="Drift turns per loop"
+              value={m.drift.turns}
+              min={-2}
+              max={2}
+              step={1}
+              onChange={(turns) => patchMotion({ drift: { ...m.drift, turns: turns || 1 } }, 'mo-dt')}
+            />
+          </Adv>
+          <div className="note">
+            Traverse (color travels the brand spectrum) and Cycle (imagery changes on a beat)
+            arrive in the next phase.
+          </div>
+        </>
+      )}
+    </Section>
+  )
+}
+
+/* ---------- 06 Export ---------- */
 
 function ExportSection(props: SidebarProps) {
   const { open, onToggleSection } = props
   const [more, setMore] = useState(false)
   return (
     <Section
-      num="05"
+      num="06"
       title="Export"
       open={open.export}
       onToggle={() => onToggleSection('export')}
@@ -2227,7 +2320,10 @@ export function Sidebar(props: SidebarProps) {
         {/* 04 — Canvas */}
         <CanvasSection {...props} />
 
-        {/* 05 — Export */}
+        {/* 05 — Motion */}
+        <MotionSection {...props} />
+
+        {/* 06 — Export */}
         <ExportSection {...props} />
       </aside>
     </Scope>
