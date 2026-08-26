@@ -377,6 +377,10 @@ export type Preset = {
   name: string
   savedAt: number
   doc: OrbDoc
+  /** Shipped with the app (lib/presets.ts): loadable everywhere, not deletable. */
+  builtin?: boolean
+  /** A builtin flagged default seeds a brand-new visitor's first document. */
+  default?: boolean
 }
 
 /**

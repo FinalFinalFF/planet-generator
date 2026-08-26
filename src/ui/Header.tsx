@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Preset } from '../types'
 
 export function Header({
@@ -16,6 +16,8 @@ export function Header({
   onSavePreset,
   onLoadPreset,
   onDeletePreset,
+  onExportPresets,
+  onImportPresets,
   batchOpen,
   onToggleBatch,
   libraryOpen,
@@ -36,6 +38,8 @@ export function Header({
   onSavePreset: (name: string) => void
   onLoadPreset: (id: string) => void
   onDeletePreset: (id: string) => void
+  onExportPresets: () => void
+  onImportPresets: (json: string) => void
   batchOpen: boolean
   onToggleBatch: () => void
   libraryOpen: boolean
@@ -43,6 +47,8 @@ export function Header({
 }) {
   const [draft, setDraft] = useState(seed)
   const [presetId, setPresetId] = useState('')
+  const importRef = useRef<HTMLInputElement>(null)
+  const selected = presets.find((p) => p.id === presetId)
   useEffect(() => setDraft(seed), [seed])
 
   const commitSeed = () => {
@@ -172,7 +178,7 @@ export function Header({
           <option value="">Presets…</option>
           {presets.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {p.builtin ? `★ ${p.name}` : p.name}
             </option>
           ))}
         </select>
@@ -189,13 +195,12 @@ export function Header({
         <button
           type="button"
           className="btn btn--icon"
-          disabled={!presetId}
-          title="Delete selected preset"
+          disabled={!presetId || !!selected?.builtin}
+          title={selected?.builtin ? 'Built-in presets ship with the app and cannot be deleted' : 'Delete selected preset'}
           aria-label="Delete selected preset"
           onClick={() => {
-            if (!presetId) return
-            const p = presets.find((x) => x.id === presetId)
-            if (p && window.confirm(`Delete preset “${p.name}”?`)) {
+            if (!presetId || selected?.builtin) return
+            if (selected && window.confirm(`Delete preset “${selected.name}”?`)) {
               onDeletePreset(presetId)
               setPresetId('')
             }
@@ -203,6 +208,35 @@ export function Header({
         >
           ✕
         </button>
+        <button
+          type="button"
+          className="btn btn--icon"
+          title="Export your presets as JSON — the hand-off for baking one into the app"
+          aria-label="Export presets"
+          onClick={onExportPresets}
+        >
+          ⤓
+        </button>
+        <button
+          type="button"
+          className="btn btn--icon"
+          title="Import presets from a JSON export"
+          aria-label="Import presets"
+          onClick={() => importRef.current?.click()}
+        >
+          ⤒
+        </button>
+        <input
+          ref={importRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) f.text().then(onImportPresets)
+            e.target.value = ''
+          }}
+        />
       </div>
     </header>
   )

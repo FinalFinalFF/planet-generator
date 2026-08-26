@@ -12,6 +12,19 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: shipped presets, a default-preset seed, and preset export/import
+
+BUILTIN_PRESETS (lib/presets.ts) follows the BUILTIN_PALETTES pattern:
+curated documents baked into the build, visible to every user (starred in
+the picker, not deletable), with one optionally flagged default — a brand-
+new visitor's first document is that preset; returning visitors keep their
+own. The header gains export (your presets as JSON — the hand-off that
+turns a staging composition into a shipped builtin) and import (the same
+file back in anywhere; docs run through normalizeDoc so old exports keep
+loading). Presets remain per-browser at runtime by design — shipping one
+is a deploy, which fits a curated brand set and would not fit live
+team-shared presets (that needs a backend this app deliberately lacks).
+
 ### Changed: orb position ships locked at canvas center
 
 DEFAULT_SUBLOCKS.orb.position is now true: a fresh document sits at 0.5/0.5

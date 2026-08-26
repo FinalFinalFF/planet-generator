@@ -12,6 +12,7 @@ import {
   defaultDoc,
   defaultPatternColors,
   makePatternLayer,
+  normalizeDoc,
 } from './lib/defaults'
 import { ORB_TYPE_LABELS, type LockSection, type OrbType } from './types'
 import { randomSeed } from './lib/rng'
@@ -38,6 +39,7 @@ import {
 import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
 import { LibraryPanel } from './ui/LibraryPanel'
+import { BUILTIN_PRESETS, defaultPresetDoc } from './lib/presets'
 import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
 
 const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'export'] as const
@@ -56,14 +58,21 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null)
   const [parsedById, setParsedById] = useState<Map<string, ParsedPattern>>(new Map())
 
-  const [initial] = useState<OrbDoc>(() => storage.loadDoc() ?? defaultDoc(randomSeed()))
+  // A brand-new visitor's first document is the default-flagged builtin
+  // preset, when one ships; returning visitors get their own document.
+  const [initial] = useState<OrbDoc>(
+    () => storage.loadDoc() ?? defaultPresetDoc() ?? defaultDoc(randomSeed()),
+  )
   const { doc, update: rawUpdate, replace, undo, redo, canUndo, canRedo } = useDoc(initial)
 
   const [palettes, setPalettes] = useState<Palette[]>(() => [
     ...BUILTIN_PALETTES,
     ...storage.loadPalettes(),
   ])
-  const [presets, setPresets] = useState<Preset[]>(() => storage.loadPresets())
+  const [presets, setPresets] = useState<Preset[]>(() => [
+    ...BUILTIN_PRESETS,
+    ...storage.loadPresets(),
+  ])
   const palette = useMemo(() => paletteById(palettes, doc.paletteId), [palettes, doc.paletteId])
 
   const [ui, setUi] = useState(() => {
@@ -222,7 +231,8 @@ export default function App() {
 
   useEffect(() => storage.savePalettes(palettes), [palettes])
   useEffect(() => storage.saveDisabledPatterns([...disabledPatterns]), [disabledPatterns])
-  useEffect(() => storage.savePresets(presets), [presets])
+  // Builtins ship in code; only the user's own presets persist.
+  useEffect(() => storage.savePresets(presets.filter((p) => !p.builtin)), [presets])
 
   /* ---- remix ---- */
 
@@ -540,8 +550,56 @@ export default function App() {
   )
 
   const deletePreset = useCallback((id: string) => {
-    setPresets((prev) => prev.filter((p) => p.id !== id))
+    // Builtins are not deletable — the UI disables this, and the guard makes
+    // sure a stray caller cannot either.
+    setPresets((prev) => prev.filter((p) => p.id !== id || p.builtin))
   }, [])
+
+  /** The user's own presets as a JSON download — the hand-off that turns a
+   *  staging composition into a shipped builtin, and a browser-to-browser
+   *  transfer in the meantime. */
+  const exportPresets = useCallback(() => {
+    const own = presets.filter((p) => !p.builtin)
+    if (own.length === 0) return notify('No presets of your own to export yet', true)
+    downloadText(
+      JSON.stringify({ format: 'orbgen.presets', version: 1, presets: own }, null, 2),
+      'orb-presets.json',
+      'application/json',
+    )
+    notify(`Exported ${own.length} preset${own.length === 1 ? '' : 's'}`)
+  }, [presets, notify])
+
+  const importPresets = useCallback(
+    (json: string) => {
+      try {
+        const data: unknown = JSON.parse(json)
+        const raw = Array.isArray(data)
+          ? data
+          : ((data as { presets?: unknown[] })?.presets ?? [])
+        const incoming: Preset[] = []
+        for (const item of raw as Preset[]) {
+          if (!item || typeof item.name !== 'string' || !item.doc) continue
+          try {
+            incoming.push({
+              id: `${newPaletteId(item.name)}`,
+              name: item.name,
+              savedAt: item.savedAt ?? Date.now(),
+              // Through the migration, so an export from an older build loads.
+              doc: normalizeDoc(item.doc),
+            })
+          } catch {
+            // skip anything that does not normalize
+          }
+        }
+        if (incoming.length === 0) return notify('No presets found in that file', true)
+        setPresets((prev) => [...prev, ...incoming])
+        notify(`Imported ${incoming.length} preset${incoming.length === 1 ? '' : 's'}`)
+      } catch {
+        notify('That file is not valid JSON', true)
+      }
+    },
+    [notify],
+  )
 
   const serializeOpts = useCallback(
     (asTransparent: boolean) => ({
@@ -888,6 +946,8 @@ export default function App() {
         onSavePreset={savePreset}
         onLoadPreset={loadPreset}
         onDeletePreset={deletePreset}
+        onExportPresets={exportPresets}
+        onImportPresets={importPresets}
         batchOpen={batchOpen}
         onToggleBatch={() => setBatchOpen((v) => !v)}
         libraryOpen={libraryOpen}
