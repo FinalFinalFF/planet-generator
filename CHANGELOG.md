@@ -12,6 +12,17 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: the shipped default preset — RSAC Collage
+
+The first curated builtin (exported from staging 2026-08-25, seed
+dusk-pulse-932): the segments collage on RSAC Main, flagged default, so a
+brand-new visitor's first document is the brand look rather than a
+hard-coded composition. Preset loads now run through normalizeDoc on every
+load (builtins ship raw in code and user presets may predate the current
+doc version). The passive blend/mask state tags on layer cards became
+buttons that open that card's advanced scope — state you can see is now
+state you can reach.
+
 ### Added: shipped presets, a default-preset seed, and preset export/import
 
 BUILTIN_PRESETS (lib/presets.ts) follows the BUILTIN_PALETTES pattern:

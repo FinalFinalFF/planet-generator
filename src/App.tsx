@@ -543,8 +543,14 @@ export default function App() {
     (id: string) => {
       const preset = presets.find((p) => p.id === id)
       if (!preset) return
-      replace(preset.doc)
-      notify(`Loaded “${preset.name}”`)
+      try {
+        // Through the migration on every load: builtins ship raw in code, and
+        // user presets may predate the current doc version.
+        replace(normalizeDoc(structuredClone(preset.doc)))
+        notify(`Loaded “${preset.name}”`)
+      } catch {
+        notify(`Preset “${preset.name}” could not be loaded`, true)
+      }
     },
     [presets, replace, notify],
   )

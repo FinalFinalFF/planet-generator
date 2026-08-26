@@ -1022,6 +1022,7 @@ function PatternPanel(props: SidebarProps) {
               patternOptions={props.patternOptions}
               onSetPattern={(patternId) => props.onSetLayerPattern(layer.id, patternId)}
               onPatch={(recipe, coalesce) => patch(layer.id, recipe, coalesce)}
+              onRevealAdvanced={() => setMoreLayers((m) => ({ ...m, [layer.id]: true }))}
             />
           )}
         </div>
@@ -1068,6 +1069,7 @@ function PatternLayerEditor({
   patternOptions,
   onSetPattern,
   onPatch,
+  onRevealAdvanced,
 }: {
   layer: PatternLayer
   palette: Palette
@@ -1075,7 +1077,10 @@ function PatternLayerEditor({
   patternOptions: SidebarProps['patternOptions']
   onSetPattern: (patternId: string) => void
   onPatch: (recipe: (l: PatternLayer) => PatternLayer, coalesce?: string) => void
+  /** Opens this card's advanced scope — the passive state tags route here. */
+  onRevealAdvanced?: () => void
 }) {
+  const tier = useTier()
   const setLock = (key: LayerPropertyLock) => (on: boolean) =>
     onPatch((l) => ({ ...l, locks: { ...l.locks, [key]: on } }))
   const k = layer.locks ?? {}
@@ -1119,15 +1124,21 @@ function PatternLayerEditor({
         onChange={(opacity) => onPatch((l) => ({ ...l, opacity }), `pat-op-${layer.id}`)}
       />
       {/* Passive state tags: hidden advanced state that changes pixels must
-          never be invisible in Simple. */}
-      {(layer.blend !== 'normal' || layer.mask.mode !== 'orb') && (
-        <div className="note">
+          never be invisible — and tapping one opens the controls that own it. */}
+      {tier !== 'advanced' && (layer.blend !== 'normal' || layer.mask.mode !== 'orb') && (
+        <button
+          type="button"
+          className="note note--link"
+          title="Open this layer's advanced settings"
+          onClick={onRevealAdvanced}
+        >
           {layer.blend !== 'normal' ? `blend: ${layer.blend}` : ''}
           {layer.blend !== 'normal' && layer.mask.mode !== 'orb' ? ' · ' : ''}
           {layer.mask.mode !== 'orb'
             ? `mask: ${layer.mask.mode}${layer.mask.feather > 0 ? ` · feather ${layer.mask.feather.toFixed(2)}` : ''}`
             : ''}
-        </div>
+          {' →'}
+        </button>
       )}
       <Adv>
         <TextField

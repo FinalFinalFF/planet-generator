@@ -1176,3 +1176,20 @@ textarea {
   text-overflow: ellipsis;
   display: block;
 }
+
+/* A passive state tag that routes to the controls owning it. */
+.note--link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--ff-divider);
+  text-underline-offset: 2px;
+}
+
+.note--link:hover {
+  color: var(--ff-text);
+  text-decoration-color: var(--ff-accent);
+}
