@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { Palette } from '../types'
 import { normalizeHex, parseHexList } from '../lib/color'
-import { Field, TextField } from './controls'
+import { Adv, Field, TextField } from './controls'
 
 export type PalettePanelProps = {
   palette: Palette
@@ -150,6 +150,7 @@ export function PalettePanel({
         Create palette from {parsed.length} color{parsed.length === 1 ? '' : 's'}
       </button>
 
+      <Adv>
       <hr className="divider" />
 
       <div className="row">
@@ -176,6 +177,7 @@ export function PalettePanel({
         Export writes every non-built-in palette as JSON. Import accepts that file, a bare array of
         palettes, or a single palette object.
       </div>
+      </Adv>
     </>
   )
 }
