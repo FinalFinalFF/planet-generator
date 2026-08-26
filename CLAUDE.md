@@ -70,7 +70,7 @@ For anything touching rendering, remix, or the pattern pipeline, add a temporary
 QA route (an extra `qa.html` + `src/qa.tsx` entry; Vite picks up new HTML entries
 automatically) that renders a grid of variants, screenshot it once, then **delete
 the route before finishing**. Useful modes: an N-up remix grid across seeds and
-palettes, a contact sheet of all 18 patterns, and a
+palettes, a contact sheet of all patterns, and a
 live-preview / exported-SVG / rasterized-PNG triptych for export parity.
 
 ## Architecture
@@ -272,7 +272,7 @@ as sphere surfaces, shading as sphere lighting, and either cue can go alone.
 `src/lib/patterns/` — `source.ts` → `parse.ts` → `registry.ts`.
 
 `Patterns/` at the repo root is the source of truth. Duplicate SVGs sit loose in
-the root folder and are **deliberately not globbed**. There are **18** files.
+the root folder and are **deliberately not globbed**. There are **27** files — the original 18 plus nine curated from the RSAC framed-patterns boards (2026-08-25).
 `source.ts` globs them with `import.meta.glob(…, {query:
 '?raw'})` lazily, so each is its own bundle chunk.
 
