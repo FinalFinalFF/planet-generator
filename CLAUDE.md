@@ -272,7 +272,7 @@ as sphere surfaces, shading as sphere lighting, and either cue can go alone.
 `src/lib/patterns/` — `source.ts` → `parse.ts` → `registry.ts`.
 
 `Patterns/` at the repo root is the source of truth. Duplicate SVGs sit loose in
-the root folder and are **deliberately not globbed**. There are **27** files — the original 18 plus nine curated from the RSAC framed-patterns boards (2026-08-25).
+the root folder and are **deliberately not globbed**. There are **31** files — the original 18 plus thirteen curated from the RSAC boards (2026-08-25).
 `source.ts` globs them with `import.meta.glob(…, {query:
 '?raw'})` lazily, so each is its own bundle chunk.
 
