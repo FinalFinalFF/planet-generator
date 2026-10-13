@@ -204,7 +204,7 @@ export const ORB_TYPE_LABELS: Record<OrbType, string> = {
   segments: 'Segments',
 }
 
-export const SECTOR_FILL_KINDS = ['flat', 'ramp', 'texture'] as const
+export const SECTOR_FILL_KINDS = ['flat', 'ramp', 'texture', 'photo'] as const
 export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
 
 /**
@@ -215,6 +215,11 @@ export type SectorFillKind = (typeof SECTOR_FILL_KINDS)[number]
  * textures, the built-in library, or an import), cover-fit and recolored
  * through the same parse pipeline as pattern layers — `colors` has one entry
  * per color group of the referenced pattern, exactly like `PatternLayer`.
+ * `photo` fills the cell with an uploaded image (`lib/photos.ts`), cover-fit
+ * over the cell: `focusX`/`focusY` (0–1) name the point of the photo — the
+ * subject — that the renderer aims at the cell's centroid, as far as covering
+ * the cell allows; `zoom` (≥ 1) crops in around it. Remix never deals a photo
+ * from the library; `doc.featuredPhoto` is how one recurs across remixes.
  */
 export type SectorFill =
   | { kind: 'flat'; color: ColorRef; locks?: PropertyLocks<CellPropertyLock> }
@@ -225,6 +230,15 @@ export type SectorFill =
       colors: ColorRef[]
       scale: number
       rotation: number
+      locks?: PropertyLocks<CellPropertyLock>
+    }
+  | {
+      kind: 'photo'
+      /** Key into the photo library; the image itself never lives in the doc. */
+      photoId: string
+      zoom: number
+      focusX: number
+      focusY: number
       locks?: PropertyLocks<CellPropertyLock>
     }
 
@@ -370,6 +384,33 @@ export type OrbDoc = {
    * gone without the other. Like `flat`, deliberately not in `doc.locks`.
    */
   solidFills: boolean
+  /**
+   * Photos Remix builds compositions around. Each remix draws a count in
+   * [min, max] and places that many *different* pool photos in *different*
+   * cells that are not fill-locked, each with its own framing — all chosen
+   * from a separate `${seed}-photo` RNG stream so the main stream never moves.
+   * With photos in the pool, remix steers the orb type to `segments` (unless
+   * the type is locked) and grows the rows when the dealt structure has fewer
+   * cells than `min` (unless the structure is locked). A standing preference
+   * like `colorSource`: survives remix via the spread, not a lock, not in
+   * `doc.locks`. An empty `photos` list means off.
+   */
+  photoPool: PhotoPool
+}
+
+/** A pool photo: which photo, and how it is framed wherever it lands. */
+export type PoolPhoto = {
+  photoId: string
+  zoom: number
+  focusX: number
+  focusY: number
+}
+
+export type PhotoPool = {
+  photos: PoolPhoto[]
+  /** Photos per orb, inclusive; capped by free cells and pool size. */
+  min: number
+  max: number
 }
 
 export type Preset = {

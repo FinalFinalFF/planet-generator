@@ -1,0 +1,14 @@
+{
+  "name": "Orb Generator Bridge",
+  "id": "orbgen-bridge-local",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:7331"],
+    "reasoning": "Receives generated orbs from the local orbgen server on this machine."
+  }
+}

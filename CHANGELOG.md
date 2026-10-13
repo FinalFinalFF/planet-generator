@@ -12,6 +12,277 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: photo and texture cells mis-masked on Figma import
+
+Pete's Figma imports showed a photo cut to a vertical strip of its cell and
+a texture cut along a vertical edge, in an orb whose real cell boundaries are
+all tilted. Flat/ramp cells (plain paths since the earlier Figma pass) were
+right, so the culprit is Figma's `clipPath` import. Both cell kinds moved to
+the structures Figma's *own* SVG export writes — so its importer round-trips
+them — and both verified render-identical in the browser (SVG vs PNG):
+
+- **Photo cells are the cell path with an image fill**: an
+  objectBoundingBox `<pattern>` holding a `<use>` of an `<image>`, exactly
+  Figma's export form. No clip at all; in Figma it is one shape whose image
+  crop is editable. Needs the cell's exact bounding box, so
+  `circleRectIntersectionBBox` computes it analytically (rect corners in the
+  circle, edge/circle crossings, circle extremes inside the rect).
+  `expandPatternFills` only rewrites `rect` fills, so it leaves these alone.
+- **Texture cells use an alpha `<mask>`** (`style="mask-type:alpha"`,
+  Figma's masked-group export) instead of a `clipPath`. Still one level,
+  never nested; batch cells (CSS-scaled) checked.
+
+Not verified inside Figma from this session — the importer is not
+scriptable here. If a mask still lands wrong, the next step is Figma's
+plugin `createNodeFromSvg` via the bridge, which uses the same importer.
+
+### Changed: texture cells always carry a background
+
+Remix dealt a texture cell's plate only half the time; transparent plates
+read as holes (in Figma, as missing cells). The coin is still drawn and now
+picks *which* ground: a dark plate with light/mid ink, or a light plate with
+dark/mid ink — same draws, stream unchanged, but existing seeds' texture
+cells change look. The 5 of 55 patterns with no plate of their own get a
+ground painted under them from the palette end opposite their inks. A
+texture chosen by hand in the cell editor starts with an opaque plate.
+
+### Added: the full-page photo library, with app-level curation
+
+Pete wanted the photo library as its own page, operating at the app level
+like the pattern library, for picking favorites/selects and setting focal
+points site-wide. Header → **Photos** opens it (the three full-page panels
+now close each other):
+
+- A grid of the whole library with views (selects / favorites / all /
+  hidden), a folder filter and search; a detail pane with a large focal
+  point picker on the full image, default zoom, Favorite (F), In pool (P),
+  Hide (H), reset to the detected focal point; ← → step through the view.
+- **Curation is app-level** (`lib/photoPrefs.ts`): favorites, hidden, and a
+  per-photo framing override. Saved to localStorage and, where the library
+  is served, to `photo-library/prefs.json` (dev server and orbgen both
+  accept a PUT of exactly that file) — so the API and MCP tools use the same
+  favorites, hidden list and framing as the editor.
+- **Framing is site-wide**: reframing a photo anywhere (library page, pool
+  card, cell) updates the override and reframes it in the open document.
+  Documents still snapshot framing in their pool/cells so presets and API
+  runs reproduce. Known gap: undo reverts the document's framing but not the
+  site-wide override.
+- The sidebar's Photos section shrank to the pool: thumbnails with focal
+  marks (drag to reframe), the per-orb range, "+ N favorites", upload, and
+  a button into the library page.
+- API/MCP: `library.favoritesOnly` / `library_favorites_only`,
+  `favorites_only` on `list_library_photos`; hidden photos are never
+  picked; site-wide framing is the default framing.
+
+### Added: the photo pool (replaces the single kept photo)
+
+Pete wanted a pool of photos, each with its own focal point, that Remix uses
+to fill *different* segments with *different* photos. `doc.featuredPhoto`
+became `doc.photoPool: { photos: PoolPhoto[], min, max }` — the same
+standing-preference citizenship. `normalizeDoc` migrates a kept photo into a
+one-photo pool (tested).
+
+- **Placement** (`placePoolPhotos`): a count drawn in [min, max]; each placed
+  photo is a different pool photo in a different non-fill-locked cell,
+  wearing its pool framing. A fill-locked cell already showing a pool photo
+  counts toward the total and that photo is not repeated.
+- **Room for photos:** when the rolled structure has fewer cells than `min`,
+  the rows grow (A first, alternating, ≤3 each) unless the structure is
+  locked — pure selection, since cell candidates are drawn at full width.
+- **Stream:** still the separate `${seed}-photo` stream, drawn at full width
+  (6 cell + 6 photo picks, then the count). Cell pick 0 comes first, so a
+  one-photo pool reproduces the single kept photo's placements exactly.
+  The main stream is asserted untouched for 1- and 3-photo pools.
+- **Framing belongs to the photo** while it is pooled: editing focus/zoom in
+  a cell or a pool card reframes the pool entry and every cell showing it,
+  in one undo entry.
+- Tests: distinct photos + per-photo framing, row growth, pinned photos,
+  stream invariance, migration — the first two confirmed failing under
+  sabotage.
+
+### Added: the local RSAC photo library (`photo-library/`, untracked)
+
+Seeded from the client's 2025 and 2026 conference photo folders in Dropbox:
+~5,900 JPEGs, 39 GB. Copies are local-only — gitignored, never deployed,
+because the repo is public and these are a client's photos.
+
+- **Built once by `tools/photo-library/build.swift`** (ImageIO + Vision):
+  ≤2048 px JPEGs with EXIF orientation baked in and *metadata stripped*
+  (originals carry GPS and camera serials), 320 px thumbnails, and a catalog.
+  4,935 photos, 3.0 GB, ~55 photos/s on 16 cores.
+- **Dedupe by file name + aspect within a source**, larger original wins,
+  folder tags merged. The first pass keyed on name + pixel size and merged
+  almost nothing: the "selects" folders are smaller re-exports of the
+  "Final High Res" files. Different aspect = a real crop, kept separate.
+- **Face-detected focal points** so 4,935 photos need no hand framing:
+  anchored on the largest face, averaged only with faces ≥ half its size
+  within three of its widths. Plain area-weighted averaging (first try) put
+  the point on the empty wall between two people in a two-shot.
+- **The app loads it lazily:** the catalog (metadata + thumbnail URLs) loads
+  up front; a full image loads only once the pool or a cell references it.
+  Holding thousands of data URLs in memory, as uploads are, would not work.
+  Served by a Vite middleware (dev + preview, not the build) and by orbgen.
+- **Photos section** (new 02; later sections renumbered): pool cards with a
+  focal-point picker and zoom, the per-orb range, multi-file upload, and a
+  paged library browser (folder tag, search, selects-only, "+ 12 random").
+  The cell editor's photo dropdown lists only pool photos and uploads.
+- **API/MCP:** `photos` (paths, URLs or library ids, each framed),
+  `library_tags`/`library_search`/`library_count` (seeded picks),
+  `photos_per_orb_min/max`, and a `list_library_photos` tool. The run log
+  records photo sources, not bytes.
+
+### Added: orbgen — REST API, MCP server and Figma bridge (`tools/orbgen`)
+
+Pete wanted orbs created and placed in Figma programmatically. Three layers:
+
+- **`api.html` / `src/api.tsx` (`window.orbgen`)** renders with the app's own
+  `OrbSvg` and exports with the same `serializeSvg`/`rasterizeSvg`, so API
+  output is byte-identical to an editor export. Rendering in Node (jsdom +
+  react-dom/server) was rejected: pattern parsing needs `DOMParser`, tile
+  expansion needs `getBBox`, PNG needs a rasterizer — a Node path would be a
+  second renderer that drifts. Shipped in the build (second Vite input).
+- **`tools/orbgen` service** drives one long-lived headless Chrome over CDP
+  (real time — virtual time hangs image decode and IndexedDB), serves
+  `dist/` itself, and exposes a localhost REST API. Calls are serialized:
+  concurrent runs in one page would share `o1-…` def ids and paint with each
+  other's gradients. The MCP server (stdio, `.mcp.json`) owns the port or,
+  if another orbgen holds it, forwards to it — one address for the plugin.
+- **Figma plugin "Orb Generator Bridge"** (development plugin). Placement
+  goes through it rather than through an agent writing Figma plugin code:
+  orb SVGs are 15 kB–several MB (photos, expanded tiles), far too large to
+  relay through a model's context. The plugin UI long-polls the service and
+  places each job as a named grid frame via `createNodeFromSvg`. "Connected"
+  means a poll is open now — a time window reported a closed plugin as
+  connected for most of a poll.
+
+Verified end to end except inside Figma itself: REST, MCP (both modes) and
+the bridge protocol with a stand-in plugin. `createNodeFromSvg` placement has
+not been exercised in Figma from this session.
+
+### Changed: a photo's focal point aims at the cell's centroid
+
+With Remix placing the kept photo into any cell, the old `object-position`
+mapping (focal point → same fraction of the cell's bounding box) cropped the
+subject in wedge and rotated cells, where that spot can fall outside the
+visible shape (seen in an API contact sheet: the target half-hidden in 2 of
+4). The focal point now aims at the cell's area centroid (grid-sampled),
+clamped so the photo still covers the box. Existing photo cells shift
+slightly toward their cell's center of mass.
+
+### Fixed: Remix in Batch mode did nothing
+
+Each batch cell is `remix(doc, batchSeed-i)`, and remix re-deals every
+unlocked value from the seed alone — so remixing the document under unchanged
+batch seeds re-rendered the same cells. While Batch is open, Remix / R now
+deals a new batch (`BatchPanel`'s `regenerate` counter); Remix All also
+re-rolls the palette as before.
+
+### Fixed: fill-locked cells could turn invisible on Remix
+
+A fill-locked cell takes inks from the dealt candidate, and the colors lock
+cycles the incoming document's inks; either source can be a texture's hidden
+plate (alpha 0), which made a flat cell vanish (found while writing the
+kept-photo tests). `transplantRefs` now carries only visible inks, and keeps
+a texture's hidden groups hidden. `withRefs` still restores a color-locked
+cell's own refs exactly. Two tests, each confirmed failing without the fix.
+
+### Added: a kept photo that Remix and Batch build around
+
+Pete wanted to upload a photo and then use Remix and Batch to generate many
+options that all include it. The first photo-cell cut (below) protected the
+photo by fill-locking its cell — which *also* pinned the whole structure
+through existence implication, so every remix was the same split with the
+photo in the same cell. **Reversed the same day:** choosing a photo no longer
+sets a fill lock.
+
+Instead `doc.featuredPhoto` (`{ photoId, zoom, focusX, focusY }` or null) is a
+standing preference, same citizenship as `colorSource`: survives remix via the
+spread, not a lock, not in `doc.locks`. When set, remix:
+
+- steers an unlocked orb type to `segments` (a selection over the draw already
+  made — a photo needs a cell to live in; a locked type wins, and the photo
+  just waits);
+- deals the structure and cells as usual, then places the photo in one cell
+  that is not fill-locked (`placeFeaturedPhoto`). A fill-locked cell already
+  showing that photo means "pinned here" — nothing is added.
+
+The cell pick comes from a **separate `${seed}-photo` RNG stream**, so the
+main stream is untouched: a seed deals the identical composition with or
+without the photo, differing in exactly one cell — asserted in
+`remix.test.ts`. Sabotage note: moving the pick onto the main `rng` at its
+current position does *not* fail the test, because it would be the last draw
+and shifts nothing; a conditional draw earlier in the stream does fail it.
+The separate stream is what keeps that true if draws are added later.
+
+UI: choosing "photo" or uploading into a cell makes it the kept photo when
+none is kept; editing a kept cell's framing updates `featuredPhoto` in the
+same undo entry; "Keep in remixes" on the cell and "Keep photo" in the Orb
+section's chip row turn it off. Deleting the photo from the library clears it.
+
+### Added: photo segment cells
+
+Pete asked to upload a photo into a segment cell, with zoom and a focal
+point. A fourth `SectorFill` kind, `photo`: `{ photoId, zoom, focusX, focusY }`.
+
+- **Storage is IndexedDB (`lib/photos.ts`), and the doc holds only the id.**
+  One photo would blow the shared localStorage budget, and keeping bytes
+  out of the doc keeps undo history, presets and remix cheap. Photos are
+  downscaled at import (3200px long edge; JPEG 0.88, PNG stays PNG).
+  Known limit: exported preset JSON carries the id, not the photo, so a
+  photo cell only renders in the browser that has the photo.
+- **The renderer embeds the photo as a data URL** (`xlink:href`, the form
+  older importers read). That keeps SVG export a pure serialization — the
+  photo travels into Figma — and lets PNG rasterization load it, which an
+  SVG-in-`<img>` cannot do with blob: or external URLs.
+- **Positioning is CSS `object-fit: cover` + `object-position`** over the
+  cell's visible box: the focal point lands at the same fraction of the
+  cell, so it can never be cropped out at any zoom (1–4 in the UI, 8 in
+  the renderer). The photo stays upright when the split structure rotates.
+  One clip per cell, same as texture cells (never nested).
+- **Remix never deals a photo, and choosing "photo" sets the cell's fill
+  lock.** *(Superseded by the kept-photo entry above — no longer auto-locks.)* Without it the next Remix would re-deal the cell and the photo
+  would vanish from the composition. The lock is visible and can be opened;
+  this is the UI choosing a default for the user, not remix special-casing
+  photos — remix treats it like any other locked cell, and existence
+  implication then pins the structure. `refsOf` returns no inks for a photo,
+  so the colors lock and Shuffle colors pass over it.
+- Focal-point drag and zoom slides coalesce into one undo entry each
+  (`SectorRowEditor`'s `onChange` now carries a coalesce key).
+
+QA note: under headless `--virtual-time-budget`, `createImageBitmap` and
+IndexedDB never resolve (same family as the rasterizer stall below). The
+real upload path was verified by driving Chrome over CDP in real time.
+
+### Changed: SVG exports import into Figma with far fewer mask groups
+
+Pete flagged a Figma import of a segments orb as hard to work with: every
+cell sat in a "Clip path group" whose mask was named
+`bbatch…-secclip-0-1`. Three changes, all verified pixel-equivalent
+(live vs exported, ≤29 of 40k pixels differing per orb — antialiasing):
+
+- **Flat and ramp cells paint their exact cell∩circle path** with no clip
+  (`circleRectIntersectionPath`, which texture cells already used). The
+  "Sector cells" group imports as plain named shapes. `rotatedRectPath`
+  had no callers left and was deleted. This is a renderer change, not an
+  export rewrite, so preview and export stay one code path.
+- **Clip and mask defs are renamed after the layer that uses them**
+  (`Sector_A2_W_Pennants_clip`, `Pattern_X_mask`; the shared orb circle is
+  `Orb_clip`), since Figma names the mask layer after the clipPath id.
+  Defs also reached via `style` or `href` are left alone — those
+  references are not rewritten. Unreferenced clips/masks are dropped.
+- **Expanded pattern tiles only get a tile clip when the content overhangs
+  the tile.** Measured with getBBox in an offscreen svg, grown by 2× the
+  widest stroke (getBBox ignores stroke; 2× covers a miter at limit 4).
+  Errs toward keeping the clip. In a sweep of all 39 patterns at default
+  tile scale, 22 no longer need per-tile clips — previously each tile was
+  its own mask group in Figma.
+
+Remaining clips are the irreducible ones: one per texture cell, the orb
+clip on pattern/shading/accent layers, lens masks, and tiles of patterns
+that genuinely overhang. QA note: in-page rasterization (`rasterizeSvg`)
+hangs under headless `--virtual-time-budget`; compare live `<svg>` against
+an `<img>` of the export in a screenshot instead.
+
 ### Fixed: segment cells never dealt the curated file patterns
 
 The user noticed some patterns rarely surfacing in batch — a 400-remix

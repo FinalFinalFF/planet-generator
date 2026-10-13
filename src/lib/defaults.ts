@@ -14,6 +14,8 @@ import {
   type Orb,
   type OrbDoc,
   type OrbType,
+  type PhotoPool,
+  type PoolPhoto,
   type SectorConfig,
   type ShadingLayer,
   type SubLocks,
@@ -317,6 +319,7 @@ export function defaultDoc(seed: string): OrbDoc {
     layers,
     flat: false,
     solidFills: false,
+    photoPool: { photos: [], min: 1, max: 1 },
     locks: {
       colors: false,
       orb: false,
@@ -344,7 +347,13 @@ type LegacyOrb = Orb & {
   mode?: 'disc' | 'sliced' | 'sectors'
   slices?: unknown
 }
-type LegacyDoc = Omit<OrbDoc, 'orb' | 'locks' | 'orbType' | 'subLocks' | 'colorSource'> & {
+type LegacyDoc = Omit<
+  OrbDoc,
+  'orb' | 'locks' | 'orbType' | 'subLocks' | 'colorSource' | 'photoPool'
+> & {
+  photoPool?: Partial<PhotoPool>
+  /** The single kept photo, before the pool (2026-10-13); becomes a one-photo pool. */
+  featuredPhoto?: PoolPhoto | null
   orb?: LegacyOrb
   planet?: LegacyOrb
   orbType?: OrbType
@@ -363,6 +372,29 @@ type LegacyDoc = Omit<OrbDoc, 'orb' | 'locks' | 'orbType' | 'subLocks' | 'colorS
  * gradient its slice ramp sampled. Deliberate (2026-08-25 decision), and
  * called out in the release note rather than silently absorbed.
  */
+const clampInt = (v: unknown, lo: number, hi: number, fallback: number) =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : fallback
+
+/** Photos per orb never exceed the cells a structure can have (two rows of 3). */
+export const MAX_PHOTOS_PER_ORB = 6
+
+function normalizePhotoPool(
+  pool: Partial<PhotoPool> | undefined,
+  legacy: PoolPhoto | null | undefined,
+): PhotoPool {
+  const photos = (pool?.photos ?? (legacy?.photoId ? [legacy] : []))
+    .filter((p) => p && typeof p.photoId === 'string' && p.photoId)
+    .map((p) => ({
+      photoId: p.photoId,
+      zoom: Math.max(1, Math.min(8, Number(p.zoom) || 1)),
+      focusX: Math.max(0, Math.min(1, Number.isFinite(p.focusX) ? p.focusX : 0.5)),
+      focusY: Math.max(0, Math.min(1, Number.isFinite(p.focusY) ? p.focusY : 0.5)),
+    }))
+  const min = clampInt(pool?.min, 0, MAX_PHOTOS_PER_ORB, 1)
+  const max = Math.max(min, clampInt(pool?.max, 0, MAX_PHOTOS_PER_ORB, Math.max(1, min)))
+  return { photos, min, max }
+}
+
 export function normalizeDoc(input: OrbDoc): OrbDoc {
   // v2 and earlier called this `planet`. Renaming the field rather than aliasing
   // it keeps one name in the model; the cost is this migration.
@@ -431,8 +463,10 @@ export function normalizeDoc(input: OrbDoc): OrbDoc {
     colorSource: doc.colorSource ?? 'palette',
     flat: doc.flat ?? false,
     solidFills: doc.solidFills ?? false,
+    photoPool: normalizePhotoPool(doc.photoPool, doc.featuredPhoto),
   }
   delete (out as { planet?: unknown }).planet
+  delete (out as { featuredPhoto?: unknown }).featuredPhoto
   delete (out as { lockPatternCount?: unknown }).lockPatternCount
   return out as OrbDoc
 }

@@ -39,13 +39,38 @@ import {
 import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
 import { LibraryPanel } from './ui/LibraryPanel'
+import { PhotoLibraryPanel } from './ui/PhotoLibraryPanel'
+import {
+  EMPTY_PREFS,
+  PhotoPrefsContext,
+  framingFor,
+  loadPhotoPrefs,
+  savePhotoPrefs,
+  type PhotoPrefs,
+  type PhotoPrefsApi,
+} from './lib/photoPrefs'
+import { withPhotoFraming, withPoolPhoto } from './lib/photoPool'
 import { BUILTIN_PRESETS, defaultPresetDoc } from './lib/presets'
 import { blobEntry, createZip, textEntry, type ZipEntry } from './lib/zip'
+import {
+  PhotoLibraryContext,
+  PhotosContext,
+  deletePhoto,
+  importPhotoFile,
+  listPhotos,
+  loadCatalog,
+  loadLibraryPhoto,
+  uploadMeta,
+  type Photo,
+  type PhotoLibrary,
+  type PhotoMeta,
+} from './lib/photos'
 
-const SECTION_KEYS = ['orb', 'palette', 'accents', 'canvas', 'export'] as const
+const SECTION_KEYS = ['orb', 'photos', 'palette', 'accents', 'canvas', 'export'] as const
 
 const DEFAULT_OPEN: Record<string, boolean> = {
   orb: true,
+  photos: false,
   palette: true,
   accents: false,
   canvas: false,
@@ -95,7 +120,10 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
+  // Remix while the batch is open deals a fresh batch — see BatchPanel's `regenerate`.
+  const [batchRegen, setBatchRegen] = useState(0)
   const [libraryOpen, setLibraryOpen] = useState(false)
+  const [photoLibraryOpen, setPhotoLibraryOpen] = useState(false)
   // Library curation: excluded pattern ids. Non-destructive — a document
   // already wearing an excluded pattern keeps rendering and re-selecting it.
   const [disabledPatterns, setDisabledPatterns] = useState<Set<string>>(
@@ -281,6 +309,138 @@ export default function App() {
     [notify],
   )
 
+  /* ---- photos: uploads (IndexedDB) + the local library catalog ---- */
+  // Docs hold only photo ids. Uploads are few and load whole; library photos
+  // can number in the thousands, so only the catalog (metadata + thumbnail
+  // URLs) loads up front and a full image loads once the pool or a cell
+  // references it.
+  const [uploads, setUploads] = useState<Photo[]>([])
+  const [catalog, setCatalog] = useState<PhotoMeta[]>([])
+  const [loadedLibrary, setLoadedLibrary] = useState<Map<string, Photo>>(new Map())
+  const loading = useRef(new Set<string>())
+  useEffect(() => {
+    let live = true
+    listPhotos().then((list) => live && setUploads(list))
+    loadCatalog().then((list) => live && setCatalog(list))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const photoLibrary = useMemo<PhotoLibrary>(() => {
+    const list = [...uploads.map(uploadMeta), ...catalog]
+    return { list, byId: new Map(list.map((m) => [m.id, m])) }
+  }, [uploads, catalog])
+
+  const photosById = useMemo(
+    () => new Map<string, Photo>([...uploads.map((p) => [p.id, p] as const), ...loadedLibrary]),
+    [uploads, loadedLibrary],
+  )
+
+  const referencedPhotos = useMemo(() => {
+    const ids = new Set(doc.photoPool.photos.map((p) => p.photoId))
+    for (const f of [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB]) {
+      if (f.kind === 'photo' && f.photoId) ids.add(f.photoId)
+    }
+    return [...ids]
+  }, [doc.photoPool, doc.orb.sectors])
+
+  useEffect(() => {
+    for (const id of referencedPhotos) {
+      if (loadedLibrary.has(id) || loading.current.has(id)) continue
+      const meta = photoLibrary.byId.get(id)
+      if (!meta || meta.origin !== 'library') continue
+      loading.current.add(id)
+      loadLibraryPhoto(meta)
+        .then((photo) => setLoadedLibrary((prev) => new Map(prev).set(id, photo)))
+        .catch((err) => notify(err instanceof Error ? err.message : 'Could not load a photo', true))
+        .finally(() => loading.current.delete(id))
+    }
+  }, [referencedPhotos, photoLibrary, loadedLibrary, notify])
+
+  /* ---- app-level photo curation: favorites, hidden, site-wide framing ---- */
+  const [photoPrefs, setPhotoPrefs] = useState<PhotoPrefs>(EMPTY_PREFS)
+  const prefsOnDisk = useRef(false)
+  const prefsLoaded = useRef(false)
+  useEffect(() => {
+    loadPhotoPrefs().then(({ prefs, onDisk }) => {
+      prefsOnDisk.current = onDisk
+      prefsLoaded.current = true
+      setPhotoPrefs(prefs)
+    })
+  }, [])
+  // Debounced save; the disk copy (when the library is served locally) is
+  // what orbgen reads, so favorites and framing are shared with the API.
+  useEffect(() => {
+    if (!prefsLoaded.current) return
+    const t = setTimeout(
+      () => void savePhotoPrefs(photoPrefs, prefsOnDisk.current || catalog.length > 0),
+      400,
+    )
+    return () => clearTimeout(t)
+  }, [photoPrefs, catalog.length])
+
+  const photoPrefsApi = useMemo<PhotoPrefsApi>(() => {
+    const toggle = (list: string[], id: string, on: boolean) =>
+      on ? (list.includes(id) ? list : [...list, id]) : list.filter((x) => x !== id)
+    return {
+      prefs: photoPrefs,
+      setFavorite: (id, on) => setPhotoPrefs((p) => ({ ...p, favorites: toggle(p.favorites, id, on) })),
+      setHidden: (id, on) => setPhotoPrefs((p) => ({ ...p, hidden: toggle(p.hidden, id, on) })),
+      reframe: (id, framing, coalesce) => {
+        const meta = photoLibrary.byId.get(id)
+        setPhotoPrefs((p) => ({
+          ...p,
+          framing: { ...p.framing, [id]: { ...framingFor(meta, p, id), ...framing } },
+        }))
+        // The open document follows: pool entry and every cell showing it.
+        update((d) => withPhotoFraming(d, id, framing), coalesce)
+      },
+      resetFraming: (id) => {
+        const meta = photoLibrary.byId.get(id)
+        setPhotoPrefs((p) => {
+          const framing = { ...p.framing }
+          delete framing[id]
+          return { ...p, framing }
+        })
+        update((d) => withPhotoFraming(d, id, { zoom: 1, focusX: meta?.focusX ?? 0.5, focusY: meta?.focusY ?? 0.5 }))
+      },
+    }
+  }, [photoPrefs, photoLibrary, update])
+
+  const onImportPhoto = useCallback(
+    async (file: File): Promise<Photo | null> => {
+      try {
+        const photo = await importPhotoFile(file)
+        setUploads((prev) => [...prev, photo])
+        notify(`Added ${photo.name}`)
+        return photo
+      } catch (err) {
+        notify(err instanceof Error ? err.message : 'Could not add that photo', true)
+        return null
+      }
+    },
+    [notify],
+  )
+
+  const onDeletePhoto = useCallback(
+    (id: string) => {
+      deletePhoto(id)
+        .then(() => {
+          setUploads((prev) => prev.filter((p) => p.id !== id))
+          // A deleted photo cannot stay in the pool Remix places from.
+          update((d) =>
+            d.photoPool.photos.some((p) => p.photoId === id)
+              ? { ...d, photoPool: { ...d.photoPool, photos: d.photoPool.photos.filter((p) => p.photoId !== id) } }
+              : d,
+          )
+          notify('Photo deleted')
+        })
+        .catch(() => notify('Could not delete that photo', true))
+    },
+    [notify, update],
+  )
+
   const doRemix = useCallback(
     (seed?: string) => {
       const next = seed ?? randomSeed()
@@ -395,8 +555,11 @@ export default function App() {
                   kind: 'texture' as const,
                   patternId,
                   // Group counts differ between patterns, so re-derive — same
-                  // rule as onSetLayerPattern.
-                  colors: defaultPatternColors(parsed, palette, 'normal'),
+                  // rule as onSetLayerPattern. Unlike a pattern layer, a cell
+                  // shows its plate: a transparent ground reads as a hole.
+                  colors: defaultPatternColors(parsed, palette, 'normal').map((c, gi) =>
+                    parsed.groups[gi]?.isBackground ? { ...c, alpha: 1 } : c,
+                  ),
                   scale: f.kind === 'texture' ? f.scale : 1,
                   rotation: f.kind === 'texture' ? f.rotation : 0,
                 }
@@ -873,7 +1036,9 @@ export default function App() {
       if (key === 'r') {
         e.preventDefault()
         if (e.shiftKey) doRemixAll()
+        else if (batchOpen) setBatchRegen((n) => n + 1)
         else doRemix()
+        if (e.shiftKey && batchOpen) setBatchRegen((n) => n + 1)
       } else if (key === 's') {
         e.preventDefault()
         doShuffleColors()
@@ -887,7 +1052,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doRemix, doRemixAll, doShuffleColors, exportSvg, transparent, undo, redo])
+  }, [batchOpen, doRemix, doRemixAll, doShuffleColors, exportSvg, transparent, undo, redo])
 
   /* ---- drag and drop pattern import ---- */
 
@@ -936,6 +1101,9 @@ export default function App() {
   }
 
   return (
+    <PhotoLibraryContext.Provider value={photoLibrary}>
+    <PhotoPrefsContext.Provider value={photoPrefsApi}>
+    <PhotosContext.Provider value={photosById}>
     <div className="app">
       <Header
         seed={doc.seed}
@@ -943,8 +1111,13 @@ export default function App() {
         canRedo={canRedo}
         presets={presets}
         colorsLocked={doc.locks.colors}
-        onRemix={() => doRemix()}
-        onRemixAll={() => doRemixAll()}
+        // In batch mode Remix deals a new batch (remixing the document would
+        // not change the cells); Remix All still re-rolls the palette too.
+        onRemix={() => (batchOpen ? setBatchRegen((n) => n + 1) : doRemix())}
+        onRemixAll={() => {
+          doRemixAll()
+          if (batchOpen) setBatchRegen((n) => n + 1)
+        }}
         onShuffleColors={doShuffleColors}
         onSeedChange={(seed) => doRemixAll(seed)}
         onUndo={undo}
@@ -955,9 +1128,24 @@ export default function App() {
         onExportPresets={exportPresets}
         onImportPresets={importPresets}
         batchOpen={batchOpen}
-        onToggleBatch={() => setBatchOpen((v) => !v)}
+        // The three full-page panels share the stage: opening one closes the others.
+        onToggleBatch={() => {
+          setBatchOpen((v) => !v)
+          setLibraryOpen(false)
+          setPhotoLibraryOpen(false)
+        }}
         libraryOpen={libraryOpen}
-        onToggleLibrary={() => setLibraryOpen((v) => !v)}
+        onToggleLibrary={() => {
+          setLibraryOpen((v) => !v)
+          setBatchOpen(false)
+          setPhotoLibraryOpen(false)
+        }}
+        photoLibraryOpen={photoLibraryOpen}
+        onTogglePhotoLibrary={() => {
+          setPhotoLibraryOpen((v) => !v)
+          setBatchOpen(false)
+          setLibraryOpen(false)
+        }}
       />
 
       <Stage
@@ -990,6 +1178,13 @@ export default function App() {
         onAddPatternLayer={onAddPatternLayer}
         onSetLayerPattern={onSetLayerPattern}
         onSetSectorTexture={onSetSectorTexture}
+        onOpenPhotoLibrary={() => {
+          setPhotoLibraryOpen(true)
+          setBatchOpen(false)
+          setLibraryOpen(false)
+        }}
+        onImportPhoto={onImportPhoto}
+        onDeletePhoto={onDeletePhoto}
         onSetOrbType={onSetOrbType}
         onRandomizeSection={onRandomizeSection}
         onRandomizePalette={onRandomizePalette}
@@ -1020,6 +1215,26 @@ export default function App() {
         }}
       />
 
+      {photoLibraryOpen && (
+        <PhotoLibraryPanel
+          poolIds={new Set(doc.photoPool.photos.map((p) => p.photoId))}
+          onTogglePool={(meta, on) =>
+            update((d) =>
+              withPoolPhoto(d, { photoId: meta.id, ...framingFor(meta, photoPrefs, meta.id) }, on),
+            )
+          }
+          onAddToPool={(metas) =>
+            update((d) =>
+              metas.reduce(
+                (acc, m) => withPoolPhoto(acc, { photoId: m.id, ...framingFor(m, photoPrefs, m.id) }, true),
+                d,
+              ),
+            )
+          }
+          onClose={() => setPhotoLibraryOpen(false)}
+        />
+      )}
+
       {libraryOpen && (
         <LibraryPanel
           entries={libraryEntries}
@@ -1046,6 +1261,7 @@ export default function App() {
           onFormatChange={setBatchFormat}
           onPngSizeChange={setBatchPngSize}
           onClose={() => setBatchOpen(false)}
+          regenerate={batchRegen}
           onPromote={promoteBatchCell}
           onExportAll={exportBatch}
           onCopyFigma={copyBatchForFigma}
@@ -1068,5 +1284,8 @@ export default function App() {
       {bootError && <div className="toast toast--error">Pattern library: {bootError}</div>}
       {toast && <div className={`toast${toast.error ? ' toast--error' : ''}`}>{toast.text}</div>}
     </div>
+    </PhotosContext.Provider>
+    </PhotoPrefsContext.Provider>
+    </PhotoLibraryContext.Provider>
   )
 }

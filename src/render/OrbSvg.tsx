@@ -19,18 +19,19 @@ import {
   type ShadingLayer,
 } from '../types'
 import { DEFAULT_LAYER_MASK } from '../lib/defaults'
-import { refAlpha, resolveColor } from '../lib/palettes'
-import { clamp, mixHex, withAlpha } from '../lib/color'
+import { usePhotos, type Photo } from '../lib/photos'
+import { refAlpha, resolveColor, slotsByLightness } from '../lib/palettes'
+import { clamp, luminance, mixHex, withAlpha } from '../lib/color'
 import {
   arcPath,
   crescentPath,
   dirFromAngle,
+  circleRectIntersectionBBox,
   circleRectIntersectionPath,
   linearEndpoints,
   n,
   polar,
   rotateAbout,
-  rotatedRectPath,
   wedgePath,
   type Box,
 } from '../lib/geometry'
@@ -53,6 +54,7 @@ type Ctx = {
   doc: OrbDoc
   palette: Palette
   parsedById: Map<string, ParsedPattern>
+  photosById: Map<string, Photo>
   prefix: string
   /** Orb center + radius in user units. */
   cx: number
@@ -202,6 +204,40 @@ function ConicSweep({
 
 /* ---------- sector collage ---------- */
 
+/**
+ * Area centroid of a sector cell (the unrotated rect ∩ the disc), rotated
+ * into place. Sampled on a grid rather than integrated: it only aims a photo's
+ * focal point, so a fraction of a percent is plenty, and sampling has no
+ * special cases for which rect edges the circle crosses.
+ */
+function cellCentroid(
+  cx: number,
+  cy: number,
+  r: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  angle: number,
+): { x: number; y: number } {
+  const N = 32
+  let sx = 0
+  let sy = 0
+  let count = 0
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const x = x0 + ((i + 0.5) / N) * (x1 - x0)
+      const y = y0 + ((j + 0.5) / N) * (y1 - y0)
+      if ((x - cx) ** 2 + (y - cy) ** 2 > r * r) continue
+      sx += x
+      sy += y
+      count++
+    }
+  }
+  if (count === 0) return rotateAbout((x0 + x1) / 2, (y0 + y1) / 2, angle, cx, cy)
+  return rotateAbout(sx / count, sy / count, angle, cx, cy)
+}
+
 /** A SectorFill ramp as a throwaway two-stop Gradient, for GradientDef. */
 function rampGradient(fill: Extract<SectorFill, { kind: 'ramp' }>): Gradient {
   return {
@@ -224,14 +260,15 @@ function rampGradient(fill: Extract<SectorFill, { kind: 'ramp' }>): Gradient {
  * independently with a hard edge.
  *
  * Geometry lives in a frame where the chord is horizontal: each cell is an
- * axis-aligned rect there, pre-rotated into place in JS and emitted as one
- * absolute `<path>` clipped only by the orb circle. Deliberately not a nested
- * clip (orb ∩ cell): Chrome mis-rasterizes nested clip-path intersections when
- * the host <svg> is CSS-scaled, which is exactly how the editor stage and the
- * batch cells render. Ramp gradients stay in absolute canvas space, so a
- * ramp's angle means the same thing in every cell regardless of `angle`.
- * Outer cell edges overhang the disc generously — the orb clip trims them —
- * so only the seams need to be exact.
+ * axis-aligned rect there, intersected with the disc and rotated into place in
+ * JS (`circleRectIntersectionPath`). Flat and ramp cells paint that exact path
+ * with no clip at all — so a Figma import gets one plain named shape per cell
+ * instead of a mask group. Texture cells need one clip, holding the same path.
+ * Never a nested clip (orb ∩ cell): Chrome mis-rasterizes nested clip-path
+ * intersections when the host <svg> is CSS-scaled, which is exactly how the
+ * editor stage and the batch cells render. Ramp gradients stay in absolute
+ * canvas space, so a ramp's angle means the same thing in every cell
+ * regardless of `angle`.
  */
 function SectorOrb({ ctx }: { ctx: Ctx }) {
   const { cx, cy, r, prefix, palette, doc } = ctx
@@ -254,19 +291,73 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
       const x0 = ci === 0 ? cx - pad : cx - r + (2 * r * ci) / row.length
       const x1 = ci === row.length - 1 ? cx + pad : cx - r + (2 * r * (ci + 1)) / row.length
 
+      // Clamp outer overhangs to just past the circle so the intersection
+      // walk works with tame numbers; never clamp *inside* the circle, or
+      // the clamp itself would change the intersection.
+      const m = r * 1.05
+      const gx0 = Math.max(x0, cx - m)
+      const gx1 = Math.min(x1, cx + m)
+      const gy0 = Math.max(y0, cy - m)
+      const gy1 = Math.min(y1, cy + m)
+      const cellD = circleRectIntersectionPath(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+      if (!cellD) return // chord pushed the cell entirely off the disc
+      const cellName = `Sector ${ri === 0 ? 'A' : 'B'}${ci + 1}`
+
+      if (fill.kind === 'photo') {
+        const photo = ctx.photosById.get(fill.photoId)
+        if (!photo) return // library not loaded yet, or the photo was deleted
+        // Painted as the cell's own path with an *image fill* — no clip. The
+        // fill is the structure Figma's own SVG export uses for an image-
+        // filled shape (an objectBoundingBox <pattern> holding a <use> of an
+        // <image>), which its importer turns back into one shape with an
+        // image fill. A clipPath around an <image> came into Figma mis-masked
+        // (photo cut to a vertical strip of its cell, 2026-10-13).
+        //
+        // Cover-fit over the cell's exact bounding box; the photo's focal
+        // point aims at the cell's centroid — not a fraction of the box,
+        // which for a wedge can land outside the visible shape — clamped so
+        // the photo still covers the box. The photo stays upright whatever
+        // the structure's angle: it is a picture, not a texture.
+        const box = circleRectIntersectionBBox(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+        if (!box) return
+        const bw = Math.max(1, box.w)
+        const bh = Math.max(1, box.h)
+        const k = Math.max(bw / photo.width, bh / photo.height) * clamp(fill.zoom, 1, 8)
+        const w = photo.width * k
+        const h = photo.height * k
+        const c = cellCentroid(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+        const px = clamp(c.x - w * clamp(fill.focusX, 0, 1), box.x + bw - w, box.x)
+        const py = clamp(c.y - h * clamp(fill.focusY, 0, 1), box.y + bh - h, box.y)
+        const patId = `${prefix}-phfill-${ri}-${ci}`
+        const imgId = `${prefix}-phimg-${ri}-${ci}`
+        defs.push(
+          <pattern key={patId} id={patId} patternContentUnits="objectBoundingBox" width="1" height="1">
+            <use
+              xlinkHref={`#${imgId}`}
+              // Image pixels → fractions of the cell's bounding box.
+              transform={`matrix(${n(k / bw, 8)} 0 0 ${n(k / bh, 8)} ${n((px - box.x) / bw, 6)} ${n((py - box.y) / bh, 6)})`}
+            />
+          </pattern>,
+          <image
+            key={imgId}
+            id={imgId}
+            width={photo.width}
+            height={photo.height}
+            preserveAspectRatio="none"
+            // xlink:href rather than href: older importers (Illustrator,
+            // some Figma paths) only read the xlink form.
+            xlinkHref={photo.dataUrl}
+          />,
+        )
+        cells.push(
+          <path key={`ph-${ri}-${ci}`} data-name={`${cellName} ${photo.name}`} d={cellD} fill={`url(#${patId})`} />,
+        )
+        return
+      }
+
       if (fill.kind === 'texture') {
         const parsed = ctx.parsedById.get(fill.patternId)
         if (!parsed) return // not parsed yet; the cell paints once it loads
-        // Clamp outer overhangs to just past the circle so the intersection
-        // walk works with tame numbers; never clamp *inside* the circle, or
-        // the clamp itself would change the intersection.
-        const m = r * 1.05
-        const gx0 = Math.max(x0, cx - m)
-        const gx1 = Math.min(x1, cx + m)
-        const gy0 = Math.max(y0, cy - m)
-        const gy1 = Math.min(y1, cy + m)
-        const cellD = circleRectIntersectionPath(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
-        if (!cellD) return // chord pushed the cell entirely off the disc
 
         const paints: GroupPaint[] = parsed.groups.map((g) => {
           const ref = fill.colors[g.index]
@@ -287,20 +378,43 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
         const transform =
           `translate(${n(bc.x)} ${n(bc.y)}) rotate(${n(fill.rotation)}) ` +
           `scale(${n(k, 5)}) translate(${n(-parsed.width / 2)} ${n(-parsed.height / 2)})`
-        const clipId = `${prefix}-secclip-${ri}-${ci}`
+        // An alpha <mask> holding the exact cell∩circle path — the form
+        // Figma's own SVG export writes for a masked group, which its importer
+        // round-trips. The equivalent clipPath imported mis-masked (a texture
+        // cut off along a vertical edge that was not the cell's, 2026-10-13).
+        // One level, never nested — see the component comment.
+        const maskId = `${prefix}-secmask-${ri}-${ci}`
         defs.push(
-          <clipPath key={clipId} id={clipId}>
-            <path d={cellD} />
-          </clipPath>,
+          <mask
+            key={maskId}
+            id={maskId}
+            maskUnits="userSpaceOnUse"
+            x={n(ctx.canvas.x)}
+            y={n(ctx.canvas.y)}
+            width={n(ctx.canvas.w)}
+            height={n(ctx.canvas.h)}
+            style={{ maskType: 'alpha' }}
+          >
+            <path d={cellD} fill="#ffffff" />
+          </mask>,
         )
+        // A pattern with no plate of its own (5 of the library) would leave
+        // the cell's gaps transparent — read as a hole in the collage. Give
+        // it a ground from the end of the palette its inks are not.
+        let ground: string | null = null
+        if (!parsed.groups.some((g) => g.isBackground)) {
+          const visible = paints.filter((p) => p.alpha > 0.001)
+          const meanL = visible.length ? visible.reduce((acc, p) => acc + luminance(p.hex), 0) / visible.length : 1
+          const order = slotsByLightness(palette)
+          ground = resolveColor({ slot: meanL > 0.5 ? order[0] : order[order.length - 1] }, palette)
+        }
         textured.push(
-          // One clip level, holding the exact cell∩circle path — see the
-          // nested-clip note in the component comment.
           <g
             key={`tx-${ri}-${ci}`}
-            clipPath={`url(#${clipId})`}
-            data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1} ${parsed.name}`}
+            mask={`url(#${maskId})`}
+            data-name={`${cellName} ${parsed.name}`}
           >
+            {ground && <path d={cellD} fill={ground} data-name="Ground" />}
             <g transform={transform} dangerouslySetInnerHTML={{ __html: markup }} />
           </g>,
         )
@@ -325,8 +439,8 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
       cells.push(
         <path
           key={`${ri}-${ci}`}
-          data-name={`Sector ${ri === 0 ? 'A' : 'B'}${ci + 1}`}
-          d={rotatedRectPath(x0, y0, x1, y1, s.angle, cx, cy)}
+          data-name={cellName}
+          d={cellD}
           fill={
             fill.kind === 'flat'
               ? color(fill.color, palette)
@@ -342,7 +456,7 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
   return (
     <Fragment>
       {defs.length > 0 && <defs>{defs}</defs>}
-      <g clipPath={`url(#${prefix}-orb-clip)`} data-name="Sector cells">{cells}</g>
+      <g data-name="Sector cells">{cells}</g>
       {textured}
     </Fragment>
   )
@@ -784,7 +898,8 @@ export function OrbSvg({
   const r = Math.max(1, (doc.orb.radius * minSide) / 2)
   const orbBox: Box = { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }
 
-  const ctx: Ctx = { doc, palette, parsedById, prefix: idPrefix, cx, cy, r, canvas }
+  const photosById = usePhotos()
+  const ctx: Ctx = { doc, palette, parsedById, photosById, prefix: idPrefix, cx, cy, r, canvas }
   const clipId = `${idPrefix}-orb-clip`
   const orbGradId = `${idPrefix}-orb-grad`
   const showBackground = !transparent && doc.background.kind !== 'transparent'

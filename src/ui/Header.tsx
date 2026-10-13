@@ -22,6 +22,8 @@ export function Header({
   onToggleBatch,
   libraryOpen,
   onToggleLibrary,
+  photoLibraryOpen,
+  onTogglePhotoLibrary,
 }: {
   seed: string
   canUndo: boolean
@@ -44,6 +46,8 @@ export function Header({
   onToggleBatch: () => void
   libraryOpen: boolean
   onToggleLibrary: () => void
+  photoLibraryOpen: boolean
+  onTogglePhotoLibrary: () => void
 }) {
   const [draft, setDraft] = useState(seed)
   const [presetId, setPresetId] = useState('')
@@ -127,6 +131,14 @@ export function Header({
           title="Curate the pattern library — what Remix deals from, plus add and remove"
         >
           Library
+        </button>
+        <button
+          type="button"
+          className={`btn${photoLibraryOpen ? ' btn--active' : ''}`}
+          onClick={onTogglePhotoLibrary}
+          title="The photo library — favorites, hidden photos, site-wide focal points, and picks for the pool"
+        >
+          Photos
         </button>
         <button
           type="button"

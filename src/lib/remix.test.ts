@@ -16,6 +16,7 @@ import type {
   Locks,
   PatternLayer,
   OrbDoc,
+  PoolPhoto,
   SectorFill,
   ShadingLayer,
   SubLocks,
@@ -670,5 +671,188 @@ describe('applyOrbType respects the lock tree', () => {
       patterns(locked).map((l) => l.visible),
     )
     expect(out.skipped).toContain('patterns')
+  })
+})
+
+describe('the photo pool', () => {
+  const P = (id: string, focusX = 0.5): PoolPhoto => ({ photoId: id, zoom: 2, focusX, focusY: 0.3 })
+  const one: OrbDoc = { ...FIXTURE, photoPool: { photos: [P('ph-a', 0.7)], min: 1, max: 1 } }
+  const cellsOf = (d: OrbDoc) => [...d.orb.sectors.rowA, ...d.orb.sectors.rowB]
+  const photoCells = (d: OrbDoc) =>
+    cellsOf(d).filter((f): f is Extract<SectorFill, { kind: 'photo' }> => f.kind === 'photo')
+  const many = Array.from({ length: 24 }, (_, i) => `photo-${i}`)
+
+  it('one photo lands in exactly one cell of a segments orb, with its framing, every remix', () => {
+    for (const seed of many) {
+      const out = remix(one, seed, deps)
+      expect(out.orbType).toBe('segments')
+      expect(out.photoPool).toEqual(one.photoPool)
+      const cells = photoCells(out)
+      expect(cells).toHaveLength(1)
+      expect(cells[0]).toMatchObject(P('ph-a', 0.7))
+    }
+    // …and it moves: the structure and the photo's cell vary across seeds.
+    const where = many.map((seed) => {
+      const s = remix(one, seed, deps).orb.sectors
+      return json({ a: s.rowA.map((f) => f.kind), b: s.rowB.map((f) => f.kind), angle: s.angle })
+    })
+    expect(new Set(where).size).toBeGreaterThan(4)
+  })
+
+  it('several photos: a count in [min, max] of different photos, each with its own framing', () => {
+    const pool = [P('ph-a', 0.1), P('ph-b', 0.4), P('ph-c', 0.6), P('ph-d', 0.9)]
+    const doc: OrbDoc = { ...FIXTURE, photoPool: { photos: pool, min: 2, max: 3 } }
+    const counts = new Set<number>()
+    for (const seed of many) {
+      const cells = photoCells(remix(doc, seed, deps))
+      counts.add(cells.length)
+      expect(cells.length).toBeGreaterThanOrEqual(2)
+      expect(cells.length).toBeLessThanOrEqual(3)
+      // Different photos, each wearing its own pool framing.
+      expect(new Set(cells.map((c) => c.photoId)).size).toBe(cells.length)
+      for (const c of cells) expect(c).toMatchObject(pool.find((p) => p.photoId === c.photoId)!)
+    }
+    expect(counts).toEqual(new Set([2, 3]))
+  })
+
+  it('grows the rows when the dealt structure has fewer cells than min', () => {
+    const doc: OrbDoc = {
+      ...FIXTURE,
+      photoPool: { photos: ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => P(`ph-${x}`)), min: 5, max: 5 },
+    }
+    for (const seed of many) {
+      const out = remix(doc, seed, deps)
+      expect(cellsOf(out).length).toBeGreaterThanOrEqual(5)
+      expect(photoCells(out)).toHaveLength(5)
+    }
+  })
+
+  it('moves no draw in the main stream: only the photo cells differ', () => {
+    // Type pinned to segments in both, so the only difference is the photos.
+    const typed: OrbDoc = { ...withSubLocks({ orb: { type: true } }), orbType: 'segments' }
+    const rest = (d: OrbDoc) =>
+      json({
+        ...d,
+        photoPool: null,
+        orb: { ...d.orb, sectors: { ...d.orb.sectors, rowA: [], rowB: [] } },
+      })
+    for (const pool of [
+      { photos: [P('ph-a')], min: 1, max: 1 },
+      { photos: [P('ph-a'), P('ph-b'), P('ph-c')], min: 1, max: 2 },
+    ]) {
+      for (const seed of many) {
+        const without = remix(typed, seed, deps)
+        const withPhotos = remix({ ...typed, photoPool: pool }, seed, deps)
+        expect(rest(withPhotos)).toBe(rest(without))
+        const a = cellsOf(without)
+        const b = cellsOf(withPhotos)
+        expect(b.length).toBe(a.length)
+        const differing = b.flatMap((f, i) => (json(f) === json(a[i]) ? [] : [i]))
+        expect(differing.length).toBe(photoCells(withPhotos).length)
+        for (const i of differing) expect(b[i].kind).toBe('photo')
+      }
+    }
+  })
+
+  it('never writes a fill-locked cell, and a pinned pool photo counts and is not repeated', () => {
+    // Fill + color locked, so the cell is byte-identical after remix.
+    const lockedCell: SectorFill = { kind: 'flat', color: { slot: 2 }, locks: { fill: true, color: true } }
+    const lockedDoc: OrbDoc = {
+      ...one,
+      orbType: 'segments',
+      orb: { ...one.orb, sectors: { ...one.orb.sectors, rowA: [lockedCell], rowB: [lockedCell] } },
+    }
+    // Every cell locked (structure pinned by implication): nowhere to go.
+    for (const seed of many) {
+      const out = remix(lockedDoc, seed, deps)
+      expect(photoCells(out)).toHaveLength(0)
+      expect(out.orb.sectors.rowA[0]).toEqual(lockedCell)
+      expect(out.orb.sectors.rowB[0]).toEqual(lockedCell)
+    }
+    // A cell pinned to a pool photo: it stays, counts toward max, and that
+    // photo is not placed a second time.
+    const pinned: SectorFill = { kind: 'photo', ...P('ph-a', 0.7), locks: { fill: true } }
+    const pinnedDoc: OrbDoc = {
+      ...lockedDoc,
+      photoPool: { photos: [P('ph-a', 0.7), P('ph-b')], min: 1, max: 1 },
+      orb: {
+        ...lockedDoc.orb,
+        sectors: { ...lockedDoc.orb.sectors, rowA: [pinned, { kind: 'flat', color: { slot: 1 } }] },
+      },
+    }
+    for (const seed of many) {
+      const out = remix(pinnedDoc, seed, deps)
+      expect(photoCells(out)).toHaveLength(1)
+      expect(out.orb.sectors.rowA[0]).toEqual(pinned)
+    }
+  })
+
+  it('stays out of the way when the type is locked to something else', () => {
+    const colorType = {
+      ...one,
+      orbType: 'color' as const,
+      subLocks: { ...NO_SUBLOCKS, orb: { ...NO_SUBLOCKS.orb, type: true } },
+    }
+    for (const seed of many.slice(0, 6)) {
+      const out = remix(colorType, seed, deps)
+      expect(out.orbType).toBe('color')
+      expect(out.photoPool).toEqual(one.photoPool) // still there for later
+    }
+  })
+
+  it('migrates a single kept photo (featuredPhoto) into a one-photo pool', () => {
+    const legacy = { ...FIXTURE, featuredPhoto: P('ph-old', 0.2) } as unknown as OrbDoc
+    delete (legacy as { photoPool?: unknown }).photoPool
+    const doc = normalizeDoc(legacy)
+    expect(doc.photoPool).toEqual({ photos: [P('ph-old', 0.2)], min: 1, max: 1 })
+    expect('featuredPhoto' in doc).toBe(false)
+  })
+})
+
+describe('carried-over inks never make a cell vanish', () => {
+  // A fill-locked cell takes its inks from the dealt candidate, and the colors
+  // lock cycles the incoming document's inks. Either source can hold a
+  // texture's hidden plate (alpha 0), which once turned flat cells invisible.
+  const hidden = (f: SectorFill) => {
+    if (f.kind === 'flat') return (f.color.alpha ?? 1) <= 0.001
+    if (f.kind === 'ramp') return (f.from.alpha ?? 1) <= 0.001 && (f.to.alpha ?? 1) <= 0.001
+    if (f.kind === 'texture') return f.colors.every((c) => (c.alpha ?? 1) <= 0.001)
+    return false
+  }
+  const many = Array.from({ length: 60 }, (_, i) => `ink-${i}`)
+  const plateTexture: SectorFill = {
+    kind: 'texture',
+    patternId: 'fake-a',
+    colors: [{ slot: 0, alpha: 0 }, { slot: 3, alpha: 1 }],
+    scale: 1,
+    rotation: 0,
+  }
+
+  it('under a fill lock', () => {
+    const flatLocked: SectorFill = { kind: 'flat', color: { slot: 2 }, locks: { fill: true } }
+    const doc: OrbDoc = {
+      ...FIXTURE,
+      orbType: 'segments',
+      orb: { ...FIXTURE.orb, sectors: { ...FIXTURE.orb.sectors, rowA: [flatLocked, flatLocked], rowB: [flatLocked] } },
+    }
+    for (const seed of many) {
+      const out = remix(doc, seed, deps)
+      for (const f of [...out.orb.sectors.rowA, ...out.orb.sectors.rowB]) expect(hidden(f)).toBe(false)
+    }
+  })
+
+  it('under the colors lock', () => {
+    const doc: OrbDoc = {
+      ...withLocks({ colors: true }),
+      orbType: 'segments',
+      orb: {
+        ...FIXTURE.orb,
+        sectors: { ...FIXTURE.orb.sectors, rowA: [plateTexture, plateTexture], rowB: [plateTexture] },
+      },
+    }
+    for (const seed of many) {
+      const out = remix(doc, seed, deps)
+      for (const f of [...out.orb.sectors.rowA, ...out.orb.sectors.rowB]) expect(hidden(f)).toBe(false)
+    }
   })
 })

@@ -105,21 +105,6 @@ function expandPatternFills(
       continue
     }
 
-    const svgNS = 'http://www.w3.org/2000/svg'
-    // One reusable clip in tile space; `<pattern>` clips tile content to the
-    // tile, and several source patterns do overhang their viewBox.
-    const clipId = `${id}-tile`
-    let clip = clone.querySelector(`clipPath[id="${CSS.escape(clipId)}"]`)
-    if (!clip) {
-      clip = document.createElementNS(svgNS, 'clipPath')
-      clip.setAttribute('id', clipId)
-      const cr = document.createElementNS(svgNS, 'rect')
-      cr.setAttribute('width', String(tileW))
-      cr.setAttribute('height', String(tileH))
-      clip.appendChild(cr)
-      pattern.parentNode?.insertBefore(clip, pattern)
-    }
-
     // Hoist every id-bearing *definition* out of the tile before cloning.
     // Cloning them per tile would repeat their ids, and only the first of a
     // duplicated id resolves. Not just `<defs>`: these Figma exports put
@@ -141,6 +126,23 @@ function expandPatternFills(
       continue
     }
 
+    // `<pattern>` clips tile content to the tile, and several source patterns
+    // do overhang their viewBox — those need one reusable clip in tile space.
+    // A tile whose content already sits inside its cell does not: the clip
+    // would be a no-op that still lands in Figma as one mask group per tile.
+    const svgNS = 'http://www.w3.org/2000/svg'
+    const clipId = `${id}-tile`
+    const needsClip = !contentFitsTile(pattern, tileW, tileH)
+    if (needsClip && !clone.querySelector(`clipPath[id="${CSS.escape(clipId)}"]`)) {
+      const clip = document.createElementNS(svgNS, 'clipPath')
+      clip.setAttribute('id', clipId)
+      const cr = document.createElementNS(svgNS, 'rect')
+      cr.setAttribute('width', String(tileW))
+      cr.setAttribute('height', String(tileH))
+      clip.appendChild(cr)
+      pattern.parentNode?.insertBefore(clip, pattern)
+    }
+
     const host = document.createElementNS(svgNS, 'g')
     // The rect may carry the lens mask; keep it on the replacement.
     const mask = rect.getAttribute('mask')
@@ -154,12 +156,15 @@ function expandPatternFills(
           'transform',
           `${baseTransform} translate(${i * tileW} ${j * tileH})`.trim(),
         )
-        const inner = document.createElementNS(svgNS, 'g')
-        inner.setAttribute('clip-path', `url(#${clipId})`)
+        let inner: Element = tile
+        if (needsClip) {
+          inner = document.createElementNS(svgNS, 'g')
+          inner.setAttribute('clip-path', `url(#${clipId})`)
+          tile.appendChild(inner)
+        }
         for (const child of Array.from(pattern.childNodes)) {
           inner.appendChild(child.cloneNode(true))
         }
-        tile.appendChild(inner)
         host.appendChild(tile)
       }
     }
@@ -170,6 +175,129 @@ function expandPatternFills(
   }
 
   return { expanded, skipped }
+}
+
+/**
+ * Does the pattern's tile content lie entirely inside its 0..w × 0..h cell, so
+ * that the tile clip `<pattern>` implies would change nothing?
+ *
+ * Measured by mounting a copy in an offscreen <svg> — getBBox needs a rendered
+ * element. getBBox ignores stroke, so the box is grown by the widest stroke
+ * (in tile units, through any inner transform) times two, which covers a
+ * miter join at the default limit of 4. Errs toward "keep the clip": a false
+ * "no" only costs a mask group, a false "yes" would change the picture.
+ */
+function contentFitsTile(pattern: Element, w: number, h: number): boolean {
+  const svgNS = 'http://www.w3.org/2000/svg'
+  const probe = document.createElementNS(svgNS, 'svg')
+  probe.setAttribute('width', '0')
+  probe.setAttribute('height', '0')
+  probe.setAttribute('style', 'position:absolute;left:-9999px;visibility:hidden')
+  const g = document.createElementNS(svgNS, 'g')
+  for (const child of Array.from(pattern.childNodes)) g.appendChild(child.cloneNode(true))
+  probe.appendChild(g)
+  document.body.appendChild(probe)
+  try {
+    const box = g.getBBox()
+    const base = g.getCTM()?.inverse()
+    let stroke = 0
+    for (const el of Array.from(g.querySelectorAll<SVGGraphicsElement>('*'))) {
+      const cs = getComputedStyle(el)
+      if (cs.stroke === 'none' || !cs.stroke) continue
+      const sw = parseFloat(cs.strokeWidth) || 0
+      const ctm = el.getCTM?.()
+      const m = base && ctm ? base.multiply(ctm) : null
+      const k = m ? Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d)) : 1
+      stroke = Math.max(stroke, sw * k)
+    }
+    const pad = stroke * 2
+    const EPS = 1e-3
+    return (
+      box.x - pad >= -EPS &&
+      box.y - pad >= -EPS &&
+      box.x + box.width + pad <= w + EPS &&
+      box.y + box.height + pad <= h + EPS
+    )
+  } catch {
+    return false
+  } finally {
+    probe.remove()
+  }
+}
+
+/**
+ * Give clip paths and masks readable ids. Figma names the mask layer it builds
+ * from a `clip-path` after the `<clipPath>`'s id, so the generated
+ * `<prefix>-secclip-0-1` lands in the layer panel as noise. Each def is renamed
+ * after the named layer that uses it (`Sector_A2_W_Pennants_clip`); the orb
+ * circle, shared by every layer, becomes `Orb_clip`. Defs no single named
+ * layer owns keep their ids. Equivalence-preserving: every reference to a
+ * renamed id is rewritten with it.
+ */
+function tidyClipDefs(clone: SVGSVGElement): void {
+  const users = new Map<string, { el: Element; attr: string }[]>()
+  for (const attr of ['clip-path', 'mask']) {
+    clone.querySelectorAll(`[${attr}]`).forEach((el) => {
+      const m = /^url\(#(.+)\)$/.exec(el.getAttribute(attr) ?? '')
+      if (!m) return
+      const list = users.get(m[1]) ?? []
+      list.push({ el, attr })
+      users.set(m[1], list)
+    })
+  }
+
+  // A def also reached some other way (a `style` url, an `href`) is left
+  // alone — only attribute references are rewritten below, and pattern artwork
+  // from design tools does use the other forms.
+  const otherwiseReferenced = new Set<string>()
+  clone.querySelectorAll('[style], [href], [*|href]').forEach((el) => {
+    const text = [
+      el.getAttribute('style'),
+      el.getAttribute('href'),
+      el.getAttributeNS('http://www.w3.org/1999/xlink', 'href'),
+    ].join(' ')
+    for (const m of text.matchAll(/#([^\s)"']+)/g)) otherwiseReferenced.add(m[1])
+  })
+
+  const taken = new Set(Array.from(clone.querySelectorAll('[id]'), (el) => el.id))
+  for (const [id, refs] of users) {
+    if (otherwiseReferenced.has(id)) continue
+    const def = clone.querySelector(`clipPath[id="${CSS.escape(id)}"], mask[id="${CSS.escape(id)}"]`)
+    if (!def) continue
+    const kind = def.tagName === 'mask' ? 'mask' : id.endsWith('-tile') ? 'tile_clip' : 'clip'
+
+    let base: string | null = null
+    if (id.endsWith('-orb-clip')) {
+      base = 'Orb_clip'
+    } else {
+      // The nearest named layer at or above every user, if they share one.
+      const owners = new Set(refs.map(({ el }) => el.closest('[id]')))
+      const [owner] = owners
+      if (owners.size === 1 && owner && owner !== clone && owner.id) base = `${owner.id}_${kind}`
+    }
+    if (!base) continue
+
+    let name = base
+    for (let i = 2; taken.has(name); i++) name = `${base}_${i}`
+    taken.delete(id)
+    taken.add(name)
+    def.setAttribute('id', name)
+    for (const { el, attr } of refs) el.setAttribute(attr, `url(#${name})`)
+  }
+
+  // Drop clips and masks nothing references — the orb clip once a segments
+  // orb paints its cells as exact shapes, for one. An importer may still
+  // surface an orphaned def as a stray layer.
+  const used = new Set(otherwiseReferenced)
+  clone.querySelectorAll('[clip-path], [mask]').forEach((el) => {
+    for (const attr of ['clip-path', 'mask']) {
+      const m = /^url\(#(.+)\)$/.exec(el.getAttribute(attr) ?? '')
+      if (m) used.add(m[1])
+    }
+  })
+  clone.querySelectorAll('clipPath[id], mask[id]').forEach((def) => {
+    if (!used.has(def.id)) def.remove()
+  })
 }
 
 function safeFilePart(s: string): string {
@@ -220,6 +348,7 @@ export function serializeSvg(source: SVGSVGElement, opts: ExportOptions): string
     // Never overwrite a def id — nothing renderable carries an id of its own.
     if (!el.hasAttribute('id')) el.setAttribute('id', n === 1 ? base : `${base}_${n}`)
   })
+  tidyClipDefs(clone)
 
   // Editor-only bookkeeping has no business in the exported file.
   clone.querySelectorAll('[data-role]').forEach((el) => el.removeAttribute('data-role'))

@@ -10,3 +10,9 @@ tsconfig.tsbuildinfo
 Examples/
 Palettes/
 Frame 468.png
+
+# Client photo library (resized RSAC conference photos + catalog), built
+# locally by tools/photo-library/build.swift. Never tracked or deployed: the
+# repo is public and these are a client's photos. The editor and orbgen read it
+# from disk when present; the public site simply has no photo library.
+/photo-library/

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "orbgen": {
+      "command": "node",
+      "args": ["tools/orbgen/mcp.mjs"]
+    }
+  }
+}

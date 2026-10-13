@@ -32,6 +32,14 @@ export type BatchPanelProps = {
   onCopyFigma: (cells: BatchCell[], nodes: Map<string, SVGSVGElement>) => void
   /** Copy one cell for Figma without promoting it. */
   onCopyCellFigma: (cell: BatchCell, el: SVGSVGElement) => void
+  /**
+   * Bumped by the header's Remix / Remix All (and R / ⇧R) while the batch is
+   * open: deal a fresh batch. Needed because a cell is `remix(doc, cellSeed)`,
+   * and a remix re-deals every unlocked value from the seed alone — so a
+   * remixed document with unchanged batch seeds renders the same nine cells,
+   * and the buttons looked dead.
+   */
+  regenerate: number
 }
 
 export type BatchCell = {
@@ -137,9 +145,16 @@ export function BatchPanel({
   onExportAll,
   onCopyFigma,
   onCopyCellFigma,
+  regenerate,
 }: BatchPanelProps) {
   const [cols, setCols] = useState<'3' | '4' | '5'>('3')
   const [batchSeed, setBatchSeed] = useState(newBatchSeed)
+  const seenRegenerate = useRef(regenerate)
+  useEffect(() => {
+    if (regenerate === seenRegenerate.current) return
+    seenRegenerate.current = regenerate
+    setBatchSeed(newBatchSeed())
+  }, [regenerate])
   const [varyPalette, setVaryPalette] = useState(false)
   const nodes = useRef(new Map<string, SVGSVGElement>())
 

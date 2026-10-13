@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   BLEND_MODES,
   MASK_MODES,
@@ -40,6 +40,11 @@ import { GradientEditor } from './GradientEditor'
 import { ExportPanel, type ExportPanelProps } from './ExportPanel'
 import { PalettePanel, type PalettePanelProps } from './PalettePanel'
 import type { ParsedPattern } from '../lib/patterns/parse'
+import { usePhotoLibrary, usePhotos, type Photo } from '../lib/photos'
+import { framingFor, usePhotoPrefs } from '../lib/photoPrefs'
+import { framingOf, framingPatch, withCell, withPoolPhoto } from '../lib/photoPool'
+import { FocalPointPicker } from './FocalPointPicker'
+import { MAX_PHOTOS_PER_ORB } from '../lib/defaults'
 import { DEFAULT_LAYER_MASK, nextId } from '../lib/defaults'
 import {
   PICKABLE_BRAND_GRADIENTS,
@@ -47,7 +52,13 @@ import {
   nearestSlot,
   type BrandGradient,
 } from '../lib/brand'
-import type { CellPropertyLock, LayerPropertyLock, PropertyLocks } from '../types'
+import type {
+  CellPropertyLock,
+  LayerPropertyLock,
+  PhotoPool,
+  PoolPhoto,
+  PropertyLocks,
+} from '../types'
 
 /* ---------- the RSAC Spectrum Strip ---------- */
 
@@ -225,6 +236,9 @@ export type SidebarProps = {
   onSetLayerPattern: (layerId: string, patternId: string) => void
   /** Point a sector cell at a texture/pattern, deriving its color groups. */
   onSetSectorTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
+  /** Add an image file to the photo library; null when it could not be read. */
+  onImportPhoto: (file: File) => Promise<Photo | null>
+  onDeletePhoto: (id: string) => void
   palettePanel: Omit<PalettePanelProps, 'palette'>
   exportPanel: ExportPanelProps
   /** Switch the orb type through `applyOrbType` (lock-respecting). */
@@ -233,6 +247,8 @@ export type SidebarProps = {
   onRandomizeSection: (section: Exclude<LockSection, 'colors'>) => void
   /** The Palette section's dice picks a different palette. */
   onRandomizePalette: () => void
+  /** Open the full-page photo library (favorites, framing, pool picks). */
+  onOpenPhotoLibrary: () => void
   /** Built-in library plus anything imported this session. */
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
 }
@@ -280,6 +296,7 @@ function defaultSectorFill(palette: Palette, index: number): SectorFill {
 function carriedInk(fill: SectorFill): ColorRef {
   if (fill.kind === 'flat') return fill.color
   if (fill.kind === 'ramp') return fill.from
+  if (fill.kind === 'photo') return { slot: 1 }
   return fill.colors.find((c, i) => i > 0 && (c.alpha ?? 1) > 0.001) ?? { slot: 1 }
 }
 
@@ -290,8 +307,11 @@ function SectorRowEditor({
   palette,
   parsedById,
   patternOptions,
+  photoPool,
+  updateDoc,
   onChange,
   onSetTexture,
+  onImportPhoto,
 }: {
   rowKey: 'rowA' | 'rowB'
   label: string
@@ -299,9 +319,15 @@ function SectorRowEditor({
   palette: Palette
   parsedById: Map<string, ParsedPattern>
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
-  onChange: (row: SectorFill[]) => void
+  photoPool: PhotoPool
+  /** Whole-document edits, for photo changes that also touch the pool. */
+  updateDoc: (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => void
+  onChange: (row: SectorFill[], coalesce?: string) => void
   onSetTexture: (row: 'rowA' | 'rowB', index: number, patternId: string) => void
+  onImportPhoto: (file: File) => Promise<Photo | null>
 }) {
+  const library = usePhotoLibrary()
+  const photoPrefs = usePhotoPrefs()
   // Per-cell disclosure, inheriting an opened parent scope (the Orb section's
   // own "more settings") so the wider toggle never closes a card back down.
   const parentAdvanced = useTier() === 'advanced'
@@ -311,8 +337,46 @@ function SectorRowEditor({
     while (next.length < count) next.push(defaultSectorFill(palette, next.length + row.length))
     onChange(next)
   }
-  const patchCell = (i: number, fill: SectorFill) =>
-    onChange(row.map((f, j) => (j === i ? fill : f)))
+  const patchCell = (i: number, fill: SectorFill, coalesce?: string) =>
+    onChange(
+      row.map((f, j) => (j === i ? fill : f)),
+      coalesce && `${rowKey}-${i}-${coalesce}`,
+    )
+  /**
+   * Edit a photo cell and keep the pool in step, in one undo entry. Framing
+   * belongs to the *photo* while it is in the pool — editing it here edits
+   * the pool entry and every cell showing that photo, so Remix places it the
+   * way it was just framed. A photo newly chosen for a cell joins the pool
+   * (and wears its pool framing if it was already there); `pool` forces
+   * membership either way.
+   */
+  const patchPhotoCell = (i: number, patch: Partial<PhotoFill>, coalesce?: string, pool?: boolean) => {
+    const cur = row[i]
+    const framing = framingPatch(patch)
+    const onlyFraming =
+      Object.keys(framing).length > 0 && Object.keys(patch).length === Object.keys(framing).length && pool === undefined
+    // Framing is a property of the photo, site-wide: reframing it here
+    // reframes it in the library, the pool and every cell showing it.
+    if (onlyFraming && cur?.kind === 'photo' && cur.photoId) {
+      photoPrefs.reframe(cur.photoId, framing, coalesce && `${rowKey}-${i}-${coalesce}`)
+      return
+    }
+    updateDoc((d) => {
+      const cur = d.orb.sectors[rowKey][i]
+      if (!cur || cur.kind !== 'photo') return d
+      const entryFor = (id: string) => d.photoPool.photos.find((p) => p.photoId === id)
+      let cell: PhotoFill = { ...cur, ...patch }
+      const switched = patch.photoId !== undefined && patch.photoId !== cur.photoId
+      const pooledAlready = switched ? entryFor(cell.photoId) : undefined
+      if (pooledAlready) cell = { ...cell, ...framingOf(pooledAlready) }
+      let next = withCell(d, rowKey, i, cell)
+      if (cell.photoId && (pool === true || (pool === undefined && switched)) && !entryFor(cell.photoId)) {
+        next = withPoolPhoto(next, { photoId: cell.photoId, ...framingOf(cell) }, true)
+      }
+      if (pool === false) next = withPoolPhoto(next, { photoId: cell.photoId, ...framingOf(cell) }, false)
+      return next
+    }, coalesce && `${rowKey}-${i}-${coalesce}`)
+  }
   // Prefer a procedural texture as the starting point; fall back to anything.
   const defaultTextureId =
     patternOptions.find((o) => o.id.startsWith('tx-'))?.id ?? patternOptions[0]?.id
@@ -370,11 +434,36 @@ function SectorRowEditor({
                 { value: 'flat', label: 'flat' },
                 { value: 'ramp', label: 'ramp' },
                 { value: 'texture', label: 'texture' },
+                { value: 'photo', label: 'photo' },
               ]}
               onChange={(kind) => {
                 if (kind === fill.kind) return
                 if (kind === 'texture') {
                   if (defaultTextureId) onSetTexture(rowKey, i, defaultTextureId)
+                  return
+                }
+                if (kind === 'photo') {
+                  // Start on the first pool photo (with its framing), else
+                  // the newest upload (which joins the pool), else an empty
+                  // cell whose editor offers the upload. No fill lock: Remix
+                  // keeps pool photos by re-placing them — lock the fill to
+                  // pin one to this cell instead.
+                  const first = photoPool.photos[0]
+                  const newest = library.list.filter((m) => m.origin === 'upload').at(-1)
+                  const start: PhotoFill = first
+                    ? { kind: 'photo', ...first, locks: fill.locks }
+                    : {
+                        kind: 'photo',
+                        photoId: newest?.id ?? '',
+                        ...framingFor(newest, photoPrefs.prefs),
+                        locks: fill.locks,
+                      }
+                  updateDoc((d) => {
+                    const next = withCell(d, rowKey, i, start)
+                    return start.photoId && !first
+                      ? withPoolPhoto(next, { photoId: start.photoId, ...framingOf(start) }, true)
+                      : next
+                  })
                   return
                 }
                 // Keep the ink when switching kinds, so toggling is not
@@ -442,6 +531,15 @@ function SectorRowEditor({
                   />
                 </Adv>
               </>
+            )}
+            {fill.kind === 'photo' && (
+              <PhotoCellEditor
+                fill={fill}
+                photoPool={photoPool}
+                onPool={(on) => patchPhotoCell(i, {}, undefined, on)}
+                onPatch={(patch, coalesce) => patchPhotoCell(i, patch, coalesce)}
+                onImportPhoto={onImportPhoto}
+              />
             )}
             {fill.kind === 'texture' && (
               <>
@@ -513,6 +611,150 @@ function SectorRowEditor({
           </Scope>
         )
       })}
+    </>
+  )
+}
+
+type PhotoFill = Extract<SectorFill, { kind: 'photo' }>
+
+/* ---------- photos ---------- */
+
+/**
+ * A photo cell: pick a photo (pool photos and uploads; the full library is
+ * browsed in the Photos section), set the focal point, and zoom. The marked
+ * spot is aimed at the cell's centre of mass (see the `photo` fill type), so
+ * the subject stays in view in any cell shape the structure deals.
+ */
+function PhotoCellEditor({
+  fill,
+  photoPool,
+  onPool,
+  onPatch,
+  onImportPhoto,
+}: {
+  fill: PhotoFill
+  photoPool: PhotoPool
+  onPool: (on: boolean) => void
+  /** `coalesce` folds a drag or slide into one undo entry. */
+  onPatch: (patch: Partial<PhotoFill>, coalesce?: string) => void
+  onImportPhoto: (file: File) => Promise<Photo | null>
+}) {
+  const library = usePhotoLibrary()
+  const prefs = usePhotoPrefs()
+  const loaded = usePhotos()
+  const meta = library.byId.get(fill.photoId)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const inPool = photoPool.photos.some((p) => p.photoId === fill.photoId)
+
+  // Pool photos first, then uploads — the full library is thousands deep and
+  // lives in the Photos section's browser, not in a dropdown.
+  const seen = new Set<string>()
+  const options: { value: string; label: string }[] = []
+  const add = (id: string, label: string) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    options.push({ value: id, label })
+  }
+  for (const p of photoPool.photos) add(p.photoId, `${library.byId.get(p.photoId)?.name ?? 'Missing photo'} · pool`)
+  for (const m of library.list) if (m.origin === 'upload') add(m.id, m.name)
+  if (fill.photoId) add(fill.photoId, meta?.name ?? 'Missing photo')
+  if (!fill.photoId) options.unshift({ value: '', label: 'No photo yet' })
+
+  return (
+    <>
+      <Select
+        label="Photo"
+        value={fill.photoId}
+        options={options}
+        tools={
+          <button
+            type="button"
+            className="btn btn--tiny"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {busy ? 'Adding…' : 'Upload'}
+          </button>
+        }
+        onChange={(photoId) => {
+          onPatch({ photoId, ...framingFor(library.byId.get(photoId), prefs.prefs, photoId) })
+        }}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="offstage"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          setBusy(true)
+          const added = await onImportPhoto(file)
+          setBusy(false)
+          // A new photo starts centered and unzoomed.
+          if (added) onPatch({ photoId: added.id, zoom: 1, focusX: 0.5, focusY: 0.5 })
+        }}
+      />
+      {fill.photoId && (
+        <div className="chiprow">
+          <ConstraintChip
+            label="In photo pool"
+            on={inPool}
+            title="Remix and Batch fill segments with photos from the pool (Photos section), each framed as set — this one included. Framing edits here update it everywhere. Lock this cell's fill instead to pin this photo to this exact cell."
+            onToggle={onPool}
+          />
+        </div>
+      )}
+      {meta ? (
+        <Field label="Focal point" hint={loaded.has(fill.photoId) ? undefined : 'loading…'}>
+          <FocalPointPicker
+            src={meta.thumbUrl}
+            width={meta.width}
+            height={meta.height}
+            focusX={fill.focusX}
+            focusY={fill.focusY}
+            onChange={(focusX, focusY) => onPatch({ focusX, focusY }, 'photo-focus')}
+          />
+        </Field>
+      ) : (
+        <div className="note">
+          {fill.photoId
+            ? 'This photo is not in this browser’s library — upload it again or pick another.'
+            : 'Upload a photo, or add some to the pool in the Photos section.'}
+        </div>
+      )}
+      <Slider
+        label="Zoom"
+        value={fill.zoom}
+        min={1}
+        max={4}
+        tools={
+          <AdvLock
+            on={!!fill.locks?.scale}
+            title="Lock the zoom against remix."
+            onToggle={(on) => onPatch({ locks: { ...fill.locks, scale: on } })}
+          />
+        }
+        onChange={(zoom) => onPatch({ zoom }, 'photo-zoom')}
+      />
+      <Adv>
+        <Slider
+          label="Focus X"
+          value={fill.focusX}
+          min={0}
+          max={1}
+          onChange={(focusX) => onPatch({ focusX }, 'photo-focus')}
+        />
+        <Slider
+          label="Focus Y"
+          value={fill.focusY}
+          min={0}
+          max={1}
+          onChange={(focusY) => onPatch({ focusY }, 'photo-focus')}
+        />
+      </Adv>
     </>
   )
 }
@@ -850,8 +1092,11 @@ function OrbSection(props: SidebarProps) {
             parsedById={parsedById}
             patternOptions={props.patternOptions}
             onSetTexture={props.onSetSectorTexture}
-            onChange={(rowA) =>
-              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowA } } }))
+            onImportPhoto={props.onImportPhoto}
+            photoPool={doc.photoPool}
+            updateDoc={update}
+            onChange={(rowA, coalesce) =>
+              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowA } } }), coalesce)
             }
           />
           <hr className="divider" />
@@ -863,8 +1108,11 @@ function OrbSection(props: SidebarProps) {
             parsedById={parsedById}
             patternOptions={props.patternOptions}
             onSetTexture={props.onSetSectorTexture}
-            onChange={(rowB) =>
-              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowB } } }))
+            onImportPhoto={props.onImportPhoto}
+            photoPool={doc.photoPool}
+            updateDoc={update}
+            onChange={(rowB, coalesce) =>
+              update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowB } } }), coalesce)
             }
           />
         </>
@@ -1918,7 +2166,7 @@ function AccentsSection(props: SidebarProps) {
 
   return (
     <Section
-      num="03"
+      num="04"
       title="Accents"
       hint={layer ? `${layer.rings.length}R ${layer.satellites.length}S` : 'none'}
       open={open.accents}
@@ -1965,7 +2213,7 @@ function ExportSection(props: SidebarProps) {
   const [more, setMore] = useState(false)
   return (
     <Section
-      num="05"
+      num="06"
       title="Export"
       open={open.export}
       onToggle={() => onToggleSection('export')}
@@ -2037,7 +2285,7 @@ function CanvasSection(props: SidebarProps) {
 
   return (
     <Section
-      num="04"
+      num="05"
       title="Canvas"
       hint={`${doc.canvas.width}×${doc.canvas.height} · ${bgLabel}`}
       open={open.canvas}
@@ -2150,6 +2398,161 @@ function CanvasSection(props: SidebarProps) {
   )
 }
 
+/* ---------- photos section: the pool Remix builds compositions around ---------- */
+
+/**
+ * The document's photo pool. Browsing, favorites and site-wide framing live
+ * in the full-page photo library (header → Photos); this section is the pool
+ * itself: which photos, how many per orb, and quick framing tweaks.
+ */
+function PhotosSection(props: SidebarProps) {
+  const { doc, open, onToggleSection, update } = props
+  const pool = doc.photoPool
+  const library = usePhotoLibrary()
+  const photoPrefs = usePhotoPrefs()
+  const [more, setMore] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const hidden = new Set(photoPrefs.prefs.hidden)
+  const favorites = photoPrefs.prefs.favorites.filter((id) => library.byId.has(id) && !hidden.has(id))
+  const missingFavorites = favorites.filter((id) => !pool.photos.some((p) => p.photoId === id))
+
+  const addEntries = (entries: PoolPhoto[]) =>
+    update((d) => entries.reduce((acc, e) => withPoolPhoto(acc, e, true), d))
+  const setRange = (min: number, max: number) =>
+    update((d) => ({ ...d, photoPool: { ...d.photoPool, min, max } }), 'photo-range')
+
+  return (
+    <Section
+      num="02"
+      title="Photos"
+      hint={pool.photos.length ? `${pool.photos.length} in pool` : undefined}
+      open={open.photos}
+      onToggle={() => onToggleSection('photos')}
+      more={{ on: more, onToggle: setMore }}
+    >
+      <div className="row">
+        {library.list.length > 0 && (
+          <button type="button" className="btn" onClick={props.onOpenPhotoLibrary}>
+            Photo library ({library.list.length})
+          </button>
+        )}
+        <button type="button" className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? 'Adding…' : 'Upload'}
+        </button>
+      </div>
+      {missingFavorites.length > 0 && (
+        <button
+          type="button"
+          className="btn btn--block"
+          title="Add every favorite from the photo library to this pool"
+          onClick={() =>
+            addEntries(
+              missingFavorites.map((id) => ({ photoId: id, ...framingFor(library.byId.get(id), photoPrefs.prefs, id) })),
+            )
+          }
+        >
+          + {missingFavorites.length} favorite{missingFavorites.length === 1 ? '' : 's'} to the pool
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="offstage"
+        onChange={async (e) => {
+          const files = [...(e.target.files ?? [])]
+          e.target.value = ''
+          if (files.length === 0) return
+          setBusy(true)
+          const added: PoolPhoto[] = []
+          for (const file of files) {
+            const photo = await props.onImportPhoto(file)
+            if (photo) added.push({ photoId: photo.id, zoom: 1, focusX: 0.5, focusY: 0.5 })
+          }
+          setBusy(false)
+          addEntries(added)
+        }}
+      />
+      {pool.photos.length === 0 && (
+        <div className="note">
+          Add photos to the pool — from the photo library, your favorites, or an upload. Remix and Batch then
+          fill segments with different photos from it, each framed as set in the library.
+        </div>
+      )}
+      {pool.photos.length > 0 && (
+        <>
+          <Slider
+            label="Fewest photos per orb"
+            value={pool.min}
+            min={0}
+            max={MAX_PHOTOS_PER_ORB}
+            step={1}
+            onChange={(min) => setRange(min, Math.max(min, pool.max))}
+          />
+          <Slider
+            label="Most photos per orb"
+            value={pool.max}
+            min={0}
+            max={MAX_PHOTOS_PER_ORB}
+            step={1}
+            onChange={(max) => setRange(Math.min(pool.min, max), max)}
+          />
+          <div className="note">
+            {pool.max === 0
+              ? 'Remix places no photos while the most is 0.'
+              : `Remix and Batch put ${pool.min === pool.max ? pool.min : `${pool.min}–${pool.max}`} different pool photo${pool.max === 1 ? '' : 's'} into each orb’s segments — switching to Segments unless the orb type is locked, and adding cells when a split has too few.`}
+            {pool.max > pool.photos.length && ` The pool has only ${pool.photos.length}.`}
+          </div>
+          <div className="poolgrid">
+            {pool.photos.map((entry) => {
+              const meta = library.byId.get(entry.photoId)
+              return (
+                <figure className="poolgrid__item" key={entry.photoId} title={meta?.name ?? 'Missing photo'}>
+                  {meta ? (
+                    <FocalPointPicker
+                      src={meta.thumbUrl}
+                      width={meta.width}
+                      height={meta.height}
+                      focusX={entry.focusX}
+                      focusY={entry.focusY}
+                      maxHeight={90}
+                      onChange={(focusX, focusY) =>
+                        photoPrefs.reframe(entry.photoId, { focusX, focusY }, `pool-${entry.photoId}-focus`)
+                      }
+                    />
+                  ) : (
+                    <div className="note">Missing photo</div>
+                  )}
+                  <button
+                    type="button"
+                    className="poolgrid__remove"
+                    title="Remove from the pool (it stays in the library)"
+                    aria-label={`Remove ${meta?.name ?? 'photo'} from the pool`}
+                    onClick={() => update((d) => withPoolPhoto(d, entry, false))}
+                  >
+                    ×
+                  </button>
+                </figure>
+              )
+            })}
+          </div>
+          <Adv>
+            <button
+              type="button"
+              className="btn btn--block"
+              onClick={() => update((d) => ({ ...d, photoPool: { ...d.photoPool, photos: [] } }))}
+            >
+              Clear the pool
+            </button>
+          </Adv>
+        </>
+      )}
+    </Section>
+  )
+}
+
 /* ---------- the sidebar ---------- */
 
 export function Sidebar(props: SidebarProps) {
@@ -2164,9 +2567,12 @@ export function Sidebar(props: SidebarProps) {
         {/* 01 — Orb */}
         <OrbSection {...props} />
 
-        {/* 02 — Palette */}
+        {/* 02 — Photos */}
+        <PhotosSection {...props} />
+
+        {/* 03 — Palette */}
         <Section
-          num="02"
+          num="03"
           title="Palette"
           hint={palette.name}
           open={open.palette}
@@ -2221,13 +2627,13 @@ export function Sidebar(props: SidebarProps) {
           <PalettePanel palette={palette} {...props.palettePanel} />
         </Section>
 
-        {/* 03 — Accents */}
+        {/* 04 — Accents */}
         <AccentsSection {...props} />
 
-        {/* 04 — Canvas */}
+        {/* 05 — Canvas */}
         <CanvasSection {...props} />
 
-        {/* 05 — Export */}
+        {/* 06 — Export */}
         <ExportSection {...props} />
       </aside>
     </Scope>

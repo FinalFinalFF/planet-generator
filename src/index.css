@@ -1193,3 +1193,282 @@ textarea {
   color: var(--ff-text);
   text-decoration-color: var(--ff-accent);
 }
+
+/* Photo cell focal-point picker: the photo at its own aspect, with a crosshair
+   mark at the focus. Click or drag anywhere on it to move the mark. */
+.focuspick {
+  position: relative;
+  /* Width is set inline so a tall photo stays under ~220px high without
+     letterboxing — the click fraction must map onto the photo itself. */
+  overflow: hidden;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-field);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.focuspick img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.focuspick__mark {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px solid #ffffff;
+  outline: 1px solid #000000;
+  pointer-events: none;
+}
+
+/* Photo library browser (Photos section): a paged thumbnail grid; a photo in
+   the pool carries the accent outline. */
+.photobrowser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-field-alt);
+}
+
+.photogrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.photogrid__item {
+  position: relative;
+  padding: 0;
+  aspect-ratio: 1;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-field);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.photogrid__item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photogrid__item--on {
+  outline: 3px solid var(--ff-accent);
+  outline-offset: -3px;
+}
+
+.photogrid__item--on::after {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  font: 11px/16px var(--ff-font-mono);
+  text-align: center;
+  color: #ffffff;
+  background: var(--ff-accent);
+}
+
+/* A toggled button (the Photos section's Library toggle), same ink as an
+   active segmented option. */
+.btn--on {
+  background: var(--ff-text);
+  border-color: var(--ff-text);
+  color: #fff;
+}
+
+/* The sidebar's pool: compact thumbnails with a focal mark (drag to reframe
+   site-wide) and a remove control. */
+.poolgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.poolgrid__item {
+  position: relative;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-field);
+  min-height: 60px;
+}
+
+.poolgrid__item .focuspick {
+  border: 0;
+}
+
+.poolgrid__remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  font: 14px/20px var(--ff-font-mono);
+  color: #fff;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+}
+
+.poolgrid__remove:hover {
+  background: var(--ff-accent);
+}
+
+/* ---------- photo library (full page) ---------- */
+
+.photolib__folder {
+  width: auto;
+  max-width: 260px;
+}
+
+.photolib__search {
+  width: 220px;
+}
+
+.photolib__body {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 0;
+}
+
+.photolib__body--detail {
+  grid-template-columns: 1fr 460px;
+}
+
+.photolib__scroll {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.photolib__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  padding: var(--space-3);
+}
+
+.photolib__tile {
+  position: relative;
+  padding: 0;
+  aspect-ratio: 1;
+  border: 1px solid var(--ff-divider);
+  background: var(--ff-field);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.photolib__tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photolib__tile--selected {
+  outline: 3px solid var(--ff-text);
+  outline-offset: -3px;
+}
+
+.photolib__badge {
+  position: absolute;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  font: 12px/20px var(--ff-font-mono);
+  text-align: center;
+  color: #fff;
+}
+
+.photolib__badge--fav {
+  left: 4px;
+  background: var(--ff-text);
+}
+
+.photolib__badge--pool {
+  right: 4px;
+  background: var(--ff-accent);
+}
+
+.photolib__sentinel {
+  height: 40px;
+}
+
+.photolib__detail {
+  border-left: 1px solid var(--ff-divider);
+  background: var(--ff-surface);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.photolib__detailhead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.photolib__name {
+  flex: 1;
+  font-family: var(--ff-font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photolib__detail .focuspick {
+  align-self: center;
+}
+
+.photolib__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.photolib__actions kbd {
+  font: 10px var(--ff-font-mono);
+  opacity: 0.7;
+}
+
+.photolib__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font: 11px/1.5 var(--ff-font-mono);
+}
+
+.photolib__meta dt {
+  color: var(--ff-text-muted);
+}
+
+.photolib__meta dd {
+  margin: 0;
+}
+
+/* The photo library's view switch holds four labelled counts; let it size to them. */
+.photolib .batch__bar .seg {
+  width: auto;
+  display: flex;
+}
+
+.photolib .batch__bar .seg__btn {
+  flex: none;
+  padding: 0 10px;
+  overflow: visible;
+}

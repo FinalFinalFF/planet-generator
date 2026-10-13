@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { --ink: #000; --muted: #555; --accent: #da3832; --line: rgba(34,34,34,0.2); }
+  body { margin: 0; padding: 12px; font: 12px/1.4 'IBM Plex Mono', ui-monospace, Menlo, monospace; color: var(--ink); background: #fff; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; background: #999; flex: none; }
+  .dot.on { background: #1f9d55; }
+  .dot.busy { background: var(--accent); }
+  .muted { color: var(--muted); margin-top: 8px; }
+  code { font: inherit; }
+</style>
+</head>
+<body>
+  <div class="row"><span id="dot" class="dot"></span><strong id="state">Connecting…</strong></div>
+  <div class="muted" id="detail">Waiting for orbgen on <code>localhost:7331</code></div>
+  <div class="muted" id="count"></div>
+<script>
+  // Long-polls the local orbgen server for placement jobs, hands each to the
+  // plugin side, and reports the outcome back. Keep this window open.
+  const BASE = 'http://localhost:7331'
+  const dot = document.getElementById('dot')
+  const state = document.getElementById('state')
+  const detail = document.getElementById('detail')
+  const count = document.getElementById('count')
+  let placed = 0
+  let resolveDone = null
+
+  onmessage = (e) => {
+    const msg = e.data.pluginMessage
+    if (msg && msg.type === 'done' && resolveDone) resolveDone(msg)
+  }
+
+  const show = (cls, s, d) => { dot.className = 'dot ' + cls; state.textContent = s; detail.textContent = d }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  async function loop() {
+    for (;;) {
+      let job = null
+      try {
+        const res = await fetch(BASE + '/v1/bridge/next?wait=25')
+        show('on', 'Connected', 'Ready — orbs sent from orbgen land on this page.')
+        if (res.status === 200) job = await res.json()
+      } catch (err) {
+        show('', 'Not connected', 'Start orbgen (the MCP server or npm run orbs:server). Retrying…')
+        await sleep(3000)
+        continue
+      }
+      if (!job) continue
+      show('busy', 'Placing…', job.orbs.length + ' orb(s) → "' + job.name + '"')
+      const done = new Promise((r) => (resolveDone = r))
+      parent.postMessage({ pluginMessage: { type: 'job', job } }, '*')
+      const msg = await done
+      resolveDone = null
+      if (!msg.error) placed += msg.result.placed
+      count.textContent = placed ? placed + ' orb(s) placed this session' : ''
+      await fetch(BASE + '/v1/bridge/result/' + job.id, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(msg.error ? { error: msg.error } : { result: msg.result }),
+      }).catch(() => {})
+      show('on', 'Connected', msg.error ? 'Last job failed: ' + msg.error : 'Ready.')
+    }
+  }
+  loop()
+</script>
+</body>
+</html>

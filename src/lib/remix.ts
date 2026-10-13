@@ -29,6 +29,7 @@ import {
   type LayerMask,
   type Orb,
   type OrbType,
+  type PhotoPool,
   type SectorFill,
   type BlendMode,
   type ColorRef,
@@ -395,16 +396,39 @@ function remixAccents(rng: Rng, palette: Palette, prev: AccentLayer, lockColors:
 function refsOf(fill: SectorFill): ColorRef[] {
   if (fill.kind === 'flat') return [fill.color]
   if (fill.kind === 'ramp') return [fill.from, fill.to]
+  if (fill.kind === 'photo') return [] // the user's own picture carries no inks
   return fill.colors
 }
 
 /** The same fill wearing a different set of refs, cycled to its width. */
 function withRefs(fill: SectorFill, refs: ColorRef[]): SectorFill {
-  if (refs.length === 0) return fill
+  if (refs.length === 0 || fill.kind === 'photo') return fill
   const at = (i: number) => refs[i % refs.length]
   if (fill.kind === 'flat') return { ...fill, color: at(0) }
   if (fill.kind === 'ramp') return { ...fill, from: at(0), to: at(1) }
   return { ...fill, colors: fill.colors.map((_, i) => at(i)) }
+}
+
+/**
+ * Inks carried over from a *different* fill — the candidate under a fill lock,
+ * or the incoming document's inks under the colors lock. Unlike `withRefs`
+ * (which restores a cell's own refs exactly), the source may hold a texture's
+ * hidden plate (alpha 0): copied verbatim into a flat or ramp cell, that made
+ * the cell invisible. So only visible inks transplant, and a texture's hidden
+ * groups stay hidden rather than becoming an opaque plate that buries its own
+ * ink. With no visible source ink the fill keeps its own refs.
+ */
+function transplantRefs(fill: SectorFill, refs: ColorRef[]): SectorFill {
+  const visible = refs.filter((c) => (c.alpha ?? 1) > 0.001)
+  if (visible.length === 0) return fill
+  if (fill.kind === 'texture') {
+    let k = 0
+    return {
+      ...fill,
+      colors: fill.colors.map((c) => ((c.alpha ?? 1) <= 0.001 ? c : visible[k++ % visible.length])),
+    }
+  }
+  return withRefs(fill, visible)
 }
 
 /**
@@ -422,7 +446,7 @@ function selectCell(cand: SectorFill, prev: SectorFill | undefined): SectorFill 
 
   let out = base
   if (k.color) out = withRefs(out, refsOf(prev))
-  else if (k.fill) out = withRefs(out, refsOf(cand))
+  else if (k.fill) out = transplantRefs(out, refsOf(cand))
 
   if (out.kind === 'texture') {
     const prevTex = prev.kind === 'texture' ? prev : undefined
@@ -441,6 +465,41 @@ function selectCell(cand: SectorFill, prev: SectorFill | undefined): SectorFill 
     }
   }
   return { ...out, locks: prev.locks }
+}
+
+/**
+ * Place pool photos. The count is drawn in [min, max]; fill-locked cells are
+ * never written (a lock is absolute), and a fill-locked cell already showing
+ * a pool photo counts toward the total and takes that photo out of the draw —
+ * the user pinned it. Each placed photo is a different pool photo in a
+ * different cell, wearing its pool framing and the replaced cell's locks.
+ * Pure selection: every pick is drawn by the caller.
+ */
+function placePoolPhotos(
+  pool: PhotoPool,
+  rowA: SectorFill[],
+  rowB: SectorFill[],
+  picks: { cell: number; photo: number }[],
+  countPick: number,
+): [SectorFill[], SectorFill[]] {
+  if (pool.photos.length === 0 || pool.max < 1) return [rowA, rowB]
+  const cells = [...rowA, ...rowB]
+  const inPool = new Set(pool.photos.map((p) => p.photoId))
+  const pinned = new Set(
+    cells.flatMap((f) => (f.locks?.fill && f.kind === 'photo' && inPool.has(f.photoId) ? [f.photoId] : [])),
+  )
+  const lo = Math.max(0, Math.min(pool.min, pool.max))
+  const target = Math.min(pool.max, lo + Math.floor(countPick * (pool.max - lo + 1)))
+  const free = cells.flatMap((f, i) => (f.locks?.fill ? [] : [i]))
+  const avail = pool.photos.filter((p) => !pinned.has(p.photoId))
+  const n = Math.min(target - pinned.size, free.length, avail.length, picks.length)
+  const at = (list: unknown[], pick: number) => Math.min(list.length - 1, Math.floor(pick * list.length))
+  for (let k = 0; k < n; k++) {
+    const cellIndex = free.splice(at(free, picks[k].cell), 1)[0]
+    const photo = avail.splice(at(avail, picks[k].photo), 1)[0]
+    cells[cellIndex] = { kind: 'photo', ...photo, locks: cells[cellIndex].locks }
+  }
+  return [cells.slice(0, rowA.length), cells.slice(rowA.length)]
 }
 
 /* ---------- entry points ---------- */
@@ -522,17 +581,20 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     const brandPick = rng.float(0, 1)
     if (kind === 'texture' && cellPool.length > 0) {
       const parsed = rng.pick(cellPool)
-      // Collage cells carry their own ground about half the time — the comps'
-      // cells are mostly opaque patches, not ink floating on the background.
-      // Without a plate the ink must come from the light end, or a dark ink on
-      // the dark canvas makes the whole cell silently vanish.
-      const plateOn = rng.bool(0.5)
-      const plateSlot = rng.pick(deck.dark)
-      const inkPool = plateOn ? [...deck.light, ...deck.mid] : deck.light
+      // Every texture cell carries its own ground: transparent plates read as
+      // holes in the collage — in Figma especially, where a cell of sparse
+      // ink over nothing looks like a missing cell (2026-10-13; this used to
+      // be a coin flip). The coin is still drawn and now picks the plate's
+      // end of the deck: a dark plate with light/mid ink, or a light plate
+      // with dark/mid ink. Same draws either way, so the stream is unchanged.
+      const darkPlate = rng.bool(0.5)
+      const plateDraw = rng.pick(deck.dark)
+      const plateSlot = darkPlate
+        ? plateDraw
+        : deck.light[Math.max(0, deck.dark.indexOf(plateDraw)) % Math.max(1, deck.light.length)] ?? plateDraw
+      const inkPool = darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]
       const colors = parsed.groups.map((g) =>
-        g.isBackground
-          ? { slot: plateSlot, alpha: plateOn ? 1 : 0 }
-          : { slot: rng.pick(inkPool), alpha: 1 },
+        g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: rng.pick(inkPool), alpha: 1 },
       )
       return {
         kind: 'texture',
@@ -613,32 +675,54 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
    * Nothing below consumes a draw.
    */
 
-  const orbType: OrbType = locks.orb || subLocks.orb.type ? doc.orbType : typeCandidate
+  // Pool photos need cells to live in, so a live pool steers an unlocked type
+  // to segments — a selection over the draw already made, like colorSource.
+  const pool = doc.photoPool
+  const poolLive = pool.photos.length > 0 && pool.max > 0
+  const orbType: OrbType =
+    locks.orb || subLocks.orb.type
+      ? doc.orbType
+      : poolLive
+        ? 'segments'
+        : typeCandidate
 
   // --- sectors: structure, then per-cell property selection ---
   const structureLocked = structureLockedFor(doc)
   const prevSec = doc.orb.sectors
   const selAngle = structureLocked ? prevSec.angle : sectorAngle
   const selOffset = structureLocked ? prevSec.offset : sectorOffset
-  const rowLen = (prevRow: SectorFill[], rolled: number) =>
-    structureLocked ? prevRow.length : rolled
-  const buildRow = (cands: SectorFill[], prevRow: SectorFill[], rolled: number): SectorFill[] =>
-    Array.from({ length: rowLen(prevRow, rolled) }, (_, i) =>
-      selectCell(cands[i % cands.length], prevRow[i]),
-    )
-  let sectorRowA = buildRow(rowACands, prevSec.rowA, rowACountRoll)
-  let sectorRowB = buildRow(rowBCands, prevSec.rowB, rowBCountRoll)
+  // Row counts: rolled, unless the structure is locked. A pool asking for
+  // more photos per orb than the rolled structure has cells grows the rows
+  // (A first, alternating, up to 3 each) — pure selection; the candidates
+  // were drawn at full width.
+  let rowACount = structureLocked ? prevSec.rowA.length : rowACountRoll
+  let rowBCount = structureLocked ? prevSec.rowB.length : rowBCountRoll
+  if (poolLive && !structureLocked) {
+    const want = Math.min(pool.min, MAX_SECTOR_CELLS * 2)
+    while (rowACount + rowBCount < want) {
+      if (rowACount <= rowBCount && rowACount < MAX_SECTOR_CELLS) rowACount++
+      else rowBCount++
+    }
+  }
+  const buildRow = (cands: SectorFill[], prevRow: SectorFill[], count: number): SectorFill[] =>
+    Array.from({ length: count }, (_, i) => selectCell(cands[i % cands.length], prevRow[i]))
+  let sectorRowA = buildRow(rowACands, prevSec.rowA, rowACount)
+  let sectorRowB = buildRow(rowBCands, prevSec.rowB, rowBCount)
   if (locks.colors) {
     // The colors lock freezes rendered colors: reuse the incoming fills'
     // ColorRefs over the selected structure, cycling if it grew — then cells
     // whose own `color` property is locked re-assert their exact refs below.
-    const prevRefs: ColorRef[] = [...prevSec.rowA, ...prevSec.rowB].flatMap(refsOf)
+    // Visible inks only: a texture's hidden plate (alpha 0) cycled into a
+    // flat cell used to make that cell vanish. See `transplantRefs`.
+    const prevRefs: ColorRef[] = [...prevSec.rowA, ...prevSec.rowB]
+      .flatMap(refsOf)
+      .filter((c) => (c.alpha ?? 1) > 0.001)
     if (prevRefs.length > 0) {
       let i = 0
       const takeNext = (fill: SectorFill): SectorFill => {
         const width = refsOf(fill).length
         const refs = Array.from({ length: width }, () => prevRefs[i++ % prevRefs.length])
-        return withRefs(fill, refs)
+        return transplantRefs(fill, refs)
       }
       const reassert = (fill: SectorFill, prev: SectorFill | undefined): SectorFill =>
         prev?.locks?.color ? withRefs(fill, refsOf(prev)) : fill
@@ -646,6 +730,19 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       sectorRowB = sectorRowB.map((f, j) => reassert(takeNext(f), prevSec.rowB[j]))
     }
   }
+
+  // --- pool photos: placed into cells of the new structure ---
+  // Their own RNG stream, drawn every time at full width, so the pool moves
+  // no draw in the main stream: a seed deals the same composition with or
+  // without photos. Cell pick k comes first so a one-photo pool keeps the
+  // placements of the single kept photo it replaced.
+  const photoRng = makeRng(`${seed}-photo`)
+  const picks = Array.from({ length: MAX_SECTOR_CELLS * 2 }, () => ({
+    cell: photoRng.float(0, 1),
+    photo: photoRng.float(0, 1),
+  }))
+  const countPick = photoRng.float(0, 1)
+  ;[sectorRowA, sectorRowB] = placePoolPhotos(pool, sectorRowA, sectorRowB, picks, countPick)
 
   const orbCandidate: Orb = {
     ...doc.orb,
@@ -891,6 +988,7 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
   const nextSlot = () => sectorPool[k++ % sectorPool.length]
   const shuffleFill = (f: SectorFill): SectorFill => {
     const dealt: SectorFill = (() => {
+      if (f.kind === 'photo') return f
       if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
       if (f.kind === 'ramp')
         return {

@@ -89,42 +89,16 @@ export function arcPath(
 }
 
 /**
- * An axis-aligned rect rotated about (cx, cy), emitted as an absolute path —
- * no `transform` attribute. Sector cells use this so they need only a single
- * clip level: Chrome mis-rasterizes *nested* clip-path intersections when the
- * host <svg> is CSS-scaled (editor stage, batch cells), and a pre-rotated
- * path clipped once by the orb circle sidesteps that entirely.
- */
-export function rotatedRectPath(
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  angleDeg: number,
-  cx: number,
-  cy: number,
-): string {
-  const a = angleDeg * DEG
-  const cos = Math.cos(a)
-  const sin = Math.sin(a)
-  const pt = (x: number, y: number) => {
-    const dx = x - cx
-    const dy = y - cy
-    return `${n(cx + dx * cos - dy * sin)},${n(cy + dx * sin + dy * cos)}`
-  }
-  return `M${pt(x0, y0)}L${pt(x1, y0)}L${pt(x1, y1)}L${pt(x0, y1)}Z`
-}
-
-/**
  * The intersection of a circle with an axis-aligned rect that has been rotated
  * about the circle's center, as one closed path of line and arc segments.
  *
  * Because the rotation is about the circle's own center, the circle is
  * invariant under it — so the intersection is computed in the unrotated frame
  * (axis-aligned rect vs. circle) and only the resulting points are rotated
- * into place. Sector texture cells clip to this path so they need exactly one
- * clip level; nesting a rect clip inside the orb clip mis-rasterizes in Chrome
- * when the host <svg> is CSS-scaled.
+ * into place. Flat and ramp sector cells paint this path directly, with no clip
+ * at all, so they import into design tools as plain shapes; texture cells clip
+ * to it so they need exactly one clip level — nesting a rect clip inside the orb
+ * clip mis-rasterizes in Chrome when the host <svg> is CSS-scaled.
  *
  * Returns '' when the shapes do not overlap.
  */
@@ -296,4 +270,83 @@ export function rotateAbout(x: number, y: number, angleDeg: number, cx: number, 
 export function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const { dx, dy } = dirFromAngle(angleDeg)
   return { x: cx + dx * r, y: cy + dy * r }
+}
+
+/**
+ * Exact bounding box of the region `circleRectIntersectionPath` draws: the
+ * axis-aligned rect (x0,y0)–(x1,y1), rotated `angleDeg` about the circle's
+ * center, intersected with the circle. The extremes of that region are among
+ * the rect corners inside the circle, the rect-edge/circle crossings, and the
+ * circle's four axis extremes that lie inside the rotated rect — so checking
+ * just those points is exact, no sampling. Null when they do not overlap.
+ */
+export function circleRectIntersectionBBox(
+  cx: number,
+  cy: number,
+  r: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  angleDeg: number,
+): { x: number; y: number; w: number; h: number } | null {
+  const EPS = 1e-6
+  const a = angleDeg * DEG
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const rot = (x: number, y: number) => ({
+    x: cx + (x - cx) * cos - (y - cy) * sin,
+    y: cy + (x - cx) * sin + (y - cy) * cos,
+  })
+  const unrot = (x: number, y: number) => ({
+    x: cx + (x - cx) * cos + (y - cy) * sin,
+    y: cy - (x - cx) * sin + (y - cy) * cos,
+  })
+  const inCircle = (x: number, y: number) => (x - cx) ** 2 + (y - cy) ** 2 <= r * r + EPS
+  const inRect = (x: number, y: number) =>
+    x >= x0 - EPS && x <= x1 + EPS && y >= y0 - EPS && y <= y1 + EPS
+
+  // Candidate points in the unrotated frame.
+  const pts: { x: number; y: number }[] = []
+  const corners = [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ]
+  for (const c of corners) if (inCircle(c.x, c.y)) pts.push(c)
+  for (let i = 0; i < 4; i++) {
+    const p = corners[i]
+    const q = corners[(i + 1) % 4]
+    const dx = q.x - p.x
+    const dy = q.y - p.y
+    const fx = p.x - cx
+    const fy = p.y - cy
+    const A = dx * dx + dy * dy
+    const B = 2 * (fx * dx + fy * dy)
+    const C = fx * fx + fy * fy - r * r
+    const disc = B * B - 4 * A * C
+    if (disc < 0 || A < EPS) continue
+    const s = Math.sqrt(disc)
+    for (const t of [(-B - s) / (2 * A), (-B + s) / (2 * A)]) {
+      if (t >= -EPS && t <= 1 + EPS) pts.push({ x: p.x + dx * t, y: p.y + dy * t })
+    }
+  }
+  // The circle's axis extremes are in *screen* axes, so test them unrotated.
+  const rotated = pts.map((p) => rot(p.x, p.y))
+  for (const e of [
+    { x: cx - r, y: cy },
+    { x: cx + r, y: cy },
+    { x: cx, y: cy - r },
+    { x: cx, y: cy + r },
+  ]) {
+    const u = unrot(e.x, e.y)
+    if (inRect(u.x, u.y)) rotated.push(e)
+  }
+  if (rotated.length === 0) return null
+  const xs = rotated.map((p) => p.x)
+  const ys = rotated.map((p) => p.y)
+  const bx = Math.min(...xs)
+  const by = Math.min(...ys)
+  return { x: bx, y: by, w: Math.max(...xs) - bx, h: Math.max(...ys) - by }
 }

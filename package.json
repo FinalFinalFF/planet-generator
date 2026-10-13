@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "orbs:server": "node tools/orbgen/server.mjs",
+    "orbs:mcp": "node tools/orbgen/mcp.mjs",
+    "orbs:install": "npm --prefix tools/orbgen install",
+    "photos:build": "mkdir -p node_modules/.cache && swiftc -O tools/photo-library/build.swift -o node_modules/.cache/build-photo-library && node_modules/.cache/build-photo-library photo-library"
   },
   "dependencies": {
     "react": "^18.3.1",

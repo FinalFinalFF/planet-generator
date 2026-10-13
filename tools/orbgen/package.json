@@ -1,0 +1,15 @@
+{
+  "name": "orbgen-tools",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local REST API, MCP server and Figma bridge for the Orb generator",
+  "scripts": {
+    "server": "node server.mjs",
+    "mcp": "node mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  }
+}

@@ -9,6 +9,18 @@ npm run dev         # Vite dev server on :5173
 npm run build       # tsc -b && vite build
 npm run typecheck   # tsc -b --noEmit
 npm test            # vitest run — three contracts that visual QA cannot see
+npm run test:watch  # vitest in watch mode
+npx vitest run src/lib/remix.test.ts   # one file (also: -t '<name>')
+```
+
+Programmatic generation and Figma placement live in `tools/orbgen` (its own
+package; see its README):
+
+```bash
+npm run orbs:install   # once: MCP SDK into tools/orbgen
+npm run orbs:server    # REST API + Figma bridge on 127.0.0.1:7331 (renders dist/)
+npm run orbs:mcp       # the MCP server (.mcp.json registers it for Claude Code)
+npm run photos:build -- "<folder>" …   # (re)build the local photo library
 ```
 
 `tsconfig.json` sets `noUnusedLocals`/`noUnusedParameters`, so an unused import
@@ -62,7 +74,12 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   --screenshot=/tmp/out.png http://localhost:5173/
 ```
 
-`--virtual-time-budget` (ms) is the only way to wait for async work.
+`--virtual-time-budget` (ms) is the only way to wait for async work with the
+plain CLI — but image decoding (`rasterizeSvg`, `createImageBitmap`) and
+IndexedDB never resolve under it. For those, drive headless Chrome in real time
+over the DevTools protocol (`--remote-debugging-port=0`, then
+`Page.navigate` / `Runtime.evaluate` / `Page.captureScreenshot` from a small
+Node script — Node 24 has a global `WebSocket`).
 `--dump-dom` prints the settled DOM, which is how you get generated data out of
 the page — render it into a `<textarea>` and parse it out of the dump.
 
@@ -112,6 +129,14 @@ This forbids a whole class of otherwise-reasonable changes:
   deduplicated), because design tools — Figma included — read `id` as the layer
   name on import, and an unnamed export lands as "Group/Vector" soup.
   `serializeSvg` then strips all `data-*`.
+- **Figma turns every `clip-path` into a "Clip path group" + mask layer** named
+  after the clipPath's id, so clips are an export-usability cost, not free.
+  `serializeSvg` renames clip/mask defs after the named layer that uses them
+  (`Sector_A2_…_clip`, `Orb_clip`), skipping any def also referenced from
+  `style`/`href`, and drops unreferenced ones. `expandPatternFills` adds the
+  per-tile clip only when `contentFitsTile` measures the tile content
+  overhanging its cell. Prefer exact geometry over a clip when adding new
+  artwork.
 
 Shading is the subtle case: its children each carry their own
 `mix-blend-mode` and their own opacity, and the wrapping `<g>` deliberately has
@@ -143,18 +168,27 @@ fill model.
 
 The `segments` type renders the collage from the 2026-08-25 client comps: one chord splits the
 disc into two rows, each row splits crosswise into 1–3 equal cells, each cell
-filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
+filled independently (`flat` ink, 2-stop `ramp`, `texture`, or `photo`). Load-bearing:
 
 - **Cell geometry is derived** — even splits; only the chord's angle and offset
   are authored. Same philosophy as the slices' derived radii.
 - **Never nest clip paths.** Chrome mis-rasterizes nested clip intersections
   when the host `<svg>` is CSS-scaled — which is how the editor stage, batch
   cells, and thumbnails all render (correct standalone, broken scaled; see
-  CHANGELOG). Flat/ramp cells are pre-rotated rect *paths* under the single orb
-  clip (`rotatedRectPath`); texture cells clip their inlined markup with one
-  clipPath holding the exact cell∩circle path (`circleRectIntersectionPath` —
-  the rotation is about the circle's center, so the circle is invariant and the
-  intersection computes in the unrotated frame).
+  CHANGELOG). Every cell's shape is the exact cell∩circle path
+  (`circleRectIntersectionPath` — the rotation is about the circle's center, so
+  the circle is invariant and the intersection computes in the unrotated
+  frame). Flat/ramp cells paint that path with **no clip at all**, so Figma
+  imports them as plain shapes rather than mask groups; texture cells clip
+  their inlined markup with one clipPath holding the same path.
+- **Figma's `clipPath` import is unreliable for cells — use its own export
+  forms.** Photo cells are the cell path with an *image fill* (objectBoundingBox
+  `<pattern>` → `<use>` → `<image>`, Figma's export structure, bbox from
+  `circleRectIntersectionBBox`); texture cells use an alpha `<mask>`
+  (`style="mask-type:alpha"`). Both replaced clipPaths that imported
+  mis-masked. Flat/ramp cells need neither.
+- **Texture cells always have a ground** (opaque plate, or a painted ground for
+  plate-less patterns): a transparent cell reads as a hole.
 - **Texture cells never paint via `<pattern>`** — `expandPatternFills` only
   rewrites `rect` fills, so a pattern-filled `<path>` would silently lose its
   texture in Figma. They inline the recolored markup cover-fit instead, which
@@ -167,9 +201,65 @@ filled independently (`flat` ink, 2-stop `ramp`, or `texture`). Load-bearing:
   layers but never touches shading or accents — and never `doc.flat` (nothing
   but the user writes a standing constraint).
 
+### Headless API (`api.html`)
+
+`src/api.tsx` exposes `window.orbgen.generate()` on `api.html` (a second Vite
+input that ships with the site). It renders with `OrbSvg` and exports through
+`serializeSvg`/`rasterizeSvg`, so it is the one-SVG invariant extended to
+automation — `tools/orbgen` drives it in headless Chrome. Do not add a Node-side
+renderer: parsing needs `DOMParser`, tile expansion `getBBox`, PNG a rasterizer,
+and a second renderer would drift. When adding a doc field or render option the
+API should expose, add it to `GenerateRequest` there and to the MCP schema in
+`tools/orbgen/mcp.mjs`. `tools/orbgen` renders from `dist/`, so rebuild (or set
+`ORBGEN_APP_URL` to the dev server) to see app changes.
+
+### Photo cells, the pool, and the photo library
+
+A segment cell can be `kind: 'photo'`; the doc stores only `photoId`.
+`OrbSvg` embeds the photo as a data-URL `<image xlink:href>`, which is what
+keeps SVG export a pure serialization and lets PNG rasterization load it — do
+not switch it to blob: URLs. Placement is cover-fit over the cell's visible
+box, with the focal point (`focusX`/`focusY`) aimed at the cell's area
+centroid and clamped to keep the box covered — not `object-position` over the
+box, which cropped subjects in wedge cells.
+
+`doc.photoPool` (`{ photos, min, max }`) is a standing preference like
+`colorSource`, not a lock. Every remix places a count in [min, max] of
+*different* pool photos into *different* non-fill-locked cells
+(`placePoolPhotos`), steers an unlocked type to `segments`, and grows the
+rows when the structure has fewer cells than `min`. All photo picks come from
+a separate `${seed}-photo` stream drawn at full width so the main stream never
+depends on the pool — keep it that way. Choosing a photo does **not**
+fill-lock the cell (tried and reversed: it pinned the whole structure, so
+Batch dealt one composition nine times). While a photo is pooled its framing
+belongs to the photo: edits reframe the pool entry and every cell showing it.
+
+**Curation is app-level, like the pattern library's include list**
+(`lib/photoPrefs.ts`, header → Photos page): favorites, hidden photos and a
+per-photo framing override, saved to localStorage and to
+`photo-library/prefs.json` (PUT by the dev server middleware and orbgen) so the
+API shares them. Reframing anywhere goes through `PhotoPrefsApi.reframe`, which
+sets the override *and* reframes the open document; documents keep their own
+snapshot so presets reproduce.
+
+Photos come from two places, unified as `PhotoMeta` in `PhotoLibraryContext`:
+uploads (IndexedDB, loaded whole) and the local **photo library**
+(`photo-library/`, ids prefixed `lib:`) — ~5,000 resized RSAC conference
+photos with face-detected focal points, built by
+`tools/photo-library/build.swift` (`npm run photos:build -- <folders>`). It
+is **client material in a public repo: gitignored, never committed, never in
+the build** — Vite serves it via a dev/preview middleware, orbgen serves it
+itself, and the public site has none. Only its catalog loads up front; full
+images load lazily once referenced (`App`'s `referencedPhotos` effect), into
+`PhotosContext`, which is what renderers read.
+
+`createImageBitmap` and IndexedDB hang under headless `--virtual-time-budget`,
+so QA for photo paths must run in real time (drive Chrome over the DevTools
+protocol).
+
 ### Procedural textures
 
-`src/lib/patterns/textures/` (rings, rules, dither, steps) generate SVG
+`src/lib/patterns/textures/` (rings, rules, dither, steps, dots, hatch, stipple, wave) generate SVG
 *strings* that register as ordinary `PatternSource`s (`procedural.ts`,
 registered by `registry.ts` at import). That is the whole design: because they
 go through the same parse → recolor pipeline as `Patterns/` files, they get
@@ -326,9 +416,11 @@ any gradient authored against a longer palette. Palettes shorter than the ~8 slo
 the default document assumes are normal (pasting four hex codes makes one), so
 this path is hit in practice.
 
-Built-ins live in `BUILTIN_PALETTES` — currently 18, all sampled from reference
-material: seven from the image boards in `Palettes/` and eleven from the
-`Palettes/Gradients/` SVGs, each with a comment naming its source file. The
+Built-ins live in `BUILTIN_PALETTES` — currently 21: three from the RSAC brand
+system first (RSAC Neutrals leads, which makes it the default palette for new
+documents — exactly 8 slots, so nothing clamps), then seven sampled from the
+image boards in `Palettes/` and eleven from the `Palettes/Gradients/` SVGs, each
+with a comment naming its source file. The
 original hand-authored set is retired but kept in a comment block above them;
 leave it there rather than deleting or reviving it.
 
@@ -453,16 +545,26 @@ Imports persist under a size budget (`storage.saveImportedPatterns` returns the
 ids that did not fit). The cap exists because localStorage is shared with the
 document and presets, and one 2 MB SVG would take those down with it.
 
+### Shipped presets
+
+`BUILTIN_PRESETS` in `lib/presets.ts` mirrors `BUILTIN_PALETTES`: whole documents
+baked into the build, marked `builtin` (loadable, not deletable). One may carry
+`default: true`; a brand-new visitor's first document *is* that preset (currently
+"RSAC Collage Spectrum", the sole builtin), while returning visitors get their own
+persisted document. To add one, design it in the app, export presets to JSON, and
+paste the object in — it runs through `normalizeDoc`, so older shapes still load.
+
 ### Doc migration
 
-`DOC_VERSION` is 3. `loadDoc`/`loadPresets` run documents through
+`DOC_VERSION` is 4 (v4 is the orb-type restructure described above). `loadDoc`/`loadPresets` run documents through
 `normalizeDoc` rather than discarding them on a version mismatch — **presets
 store whole documents**, so discarding would silently delete the user's saved
 presets. When adding a field to the doc model, give it a default in
 `normalizeDoc`.
 
-v3 is the planet→orb rename, and it is the one migration that renames rather
-than adds, so it has three moving parts that must stay together:
+v3 was the planet→orb rename. Unlike most migrations it renames rather than
+adds (v4's `orb.mode`→`orbType` is the other), so it has three moving parts that
+must stay together:
 
 - `normalizeDoc` reads `doc.planet` when `doc.orb` is absent, maps `locks.planet`
   to `locks.orb`, and rewrites any pattern layer's `mask.mode: 'planet'` to
