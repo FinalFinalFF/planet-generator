@@ -32,6 +32,7 @@ import {
   n,
   polar,
   rotateAbout,
+  rowEdges,
   wedgePath,
   type Box,
 } from '../lib/geometry'
@@ -288,8 +289,9 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
     const y0 = ri === 0 ? cy - pad : chordY
     const y1 = ri === 0 ? chordY : cy + pad
     row.forEach((fill, ci) => {
-      const x0 = ci === 0 ? cx - pad : cx - r + (2 * r * ci) / row.length
-      const x1 = ci === row.length - 1 ? cx + pad : cx - r + (2 * r * (ci + 1)) / row.length
+      const edges = rowEdges(row.length, ri === 0 ? s.widthsA : s.widthsB)
+      const x0 = ci === 0 ? cx - pad : cx - r + 2 * r * edges[ci]
+      const x1 = ci === row.length - 1 ? cx + pad : cx - r + 2 * r * edges[ci + 1]
 
       // Clamp outer overhangs to just past the circle so the intersection
       // walk works with tame numbers; never clamp *inside* the circle, or
@@ -322,10 +324,25 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
         if (!box) return
         const bw = Math.max(1, box.w)
         const bh = Math.max(1, box.h)
-        const k = Math.max(bw / photo.width, bh / photo.height) * clamp(fill.zoom, 1, 8)
+        // Zoom in only as far as needed (at most 1.6× the cover size) for the
+        // focal point to land within a quarter of the cell's size of its
+        // centroid without exposing an edge. Plain cover size let the edge
+        // clamp slide subjects to the cut in long thin cells; zooming to the
+        // exact centroid (first try, cap 3×) blew faces up to fill the cell.
+        const c = cellCentroid(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
+        const fx = clamp(fill.focusX, 0.001, 0.999)
+        const fy = clamp(fill.focusY, 0.001, 0.999)
+        const SLACK = 0.25
+        const kCover = Math.max(bw / photo.width, bh / photo.height) * clamp(fill.zoom, 1, 8)
+        const kNeeded = Math.max(
+          (c.x - SLACK * bw - box.x) / (photo.width * fx),
+          (box.x + bw - (c.x + SLACK * bw)) / (photo.width * (1 - fx)),
+          (c.y - SLACK * bh - box.y) / (photo.height * fy),
+          (box.y + bh - (c.y + SLACK * bh)) / (photo.height * (1 - fy)),
+        )
+        const k = Math.max(kCover, Math.min(kNeeded, kCover * 1.6))
         const w = photo.width * k
         const h = photo.height * k
-        const c = cellCentroid(cx, cy, r, gx0, gy0, gx1, gy1, s.angle)
         const px = clamp(c.x - w * clamp(fill.focusX, 0, 1), box.x + bw - w, box.x)
         const py = clamp(c.y - h * clamp(fill.focusY, 0, 1), box.y + bh - h, box.y)
         const patId = `${prefix}-phfill-${ri}-${ci}`

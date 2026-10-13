@@ -104,7 +104,15 @@ npm run photos:build -- "<source folder>" ["<source folder>" …]
 ```
 
 It is re-runnable: photos already built are kept, so adding a folder only
-processes what is new. Duplicates (same file name and aspect within a source —
+processes what is new, and photos from sources not named in a run are left
+alone. Name a collection with `--as` — e.g. to import a dropped-in folder:
+
+```bash
+npm run photos:build -- photo-library/inbox --as "San Francisco"
+tools/photo-library/deploy.sh   # then publish to the team library
+```
+
+A named collection counts as selects (it was hand-picked). Duplicates (same file name and aspect within a source —
 the selects folders re-export the high-res originals) merge into one photo
 tagged with every folder it appeared in. The dev server and orbgen serve it;
 the public site has none.

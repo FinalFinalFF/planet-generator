@@ -248,10 +248,11 @@ export type SectorFill =
  * cell filled independently with a hard edge — a collage of textures, not a
  * shaded sphere.
  *
- * Cell geometry is derived, matching the slices' philosophy: cells split a
- * row's width evenly, and only the chord's angle and offset are authored.
- * There is deliberately no per-cell geometry control and no feathering —
- * hard seams are the look.
+ * Cell geometry is derived: the chord's angle and offset, plus each row's
+ * relative cell widths (`widthsA`/`widthsB`, even when absent — strictly even
+ * splits were the rule until 2026-10-13, when they read as too regular).
+ * Cuts stay perpendicular to the chord (cells are rects in the rotated frame)
+ * and there is no feathering — hard seams are the look.
  */
 export type SectorConfig = {
   /** Rotation of the whole split structure, degrees clockwise. 0 = horizontal chord. */
@@ -261,6 +262,13 @@ export type SectorConfig = {
   /** Fills for the two rows' cells (1–3 each). At angle 0, row A is on top. */
   rowA: SectorFill[]
   rowB: SectorFill[]
+  /**
+   * Relative cell widths per row (2026-10-13; cells used to be strictly
+   * even). Absent, empty, or not matching the row's cell count → even.
+   * Part of the structure: the structure sub-lock pins them.
+   */
+  widthsA?: number[]
+  widthsB?: number[]
 }
 
 export type Orb = {
@@ -320,7 +328,12 @@ export type Locks = Record<LockSection, boolean>
  * fully typed so `normalizeDoc` can default it structurally.
  */
 export type SubLocks = {
-  orb: { type: boolean; size: boolean; position: boolean; structure: boolean }
+  /**
+   * `cells` keeps both rows' cell counts while the chord, offset and widths
+   * still re-deal (2026-10-13: "lock the number of cells" — a batch of
+   * two-cell orbs). `structure` ⊇ `cells`: it pins all of it.
+   */
+  orb: { type: boolean; size: boolean; position: boolean; structure: boolean; cells: boolean }
   patterns: { count: boolean }
   colors: { palette: boolean }
 }
@@ -330,7 +343,7 @@ export const DEFAULT_SUBLOCKS: SubLocks = {
   // at canvas center and remix keeps it there — compositions drift only when
   // someone deliberately unlocks the pair. Migrated documents get the same
   // default, freezing whatever position they already had.
-  orb: { type: false, size: false, position: true, structure: false },
+  orb: { type: false, size: false, position: true, structure: false, cells: false },
   patterns: { count: false },
   colors: { palette: false },
 }

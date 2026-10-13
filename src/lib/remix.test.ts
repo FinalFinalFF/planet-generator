@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { remix, remixSection, shuffleColors } from './remix'
+import { sectorCellAreas } from './geometry'
 import { applyOrbType, defaultDoc, normalizeDoc } from './defaults'
 import { BUILTIN_PALETTES, paletteById, paperSlots } from './palettes'
 import type { ParsedPattern } from './patterns/parse'
@@ -75,7 +76,7 @@ const palette = paletteById(BUILTIN_PALETTES, BUILTIN_PALETTES[0].id)
 const deps = { available, palette }
 
 const NO_SUBLOCKS: SubLocks = {
-  orb: { type: false, size: false, position: false, structure: false },
+  orb: { type: false, size: false, position: false, structure: false, cells: false },
   patterns: { count: false },
   colors: { palette: false },
 }
@@ -873,6 +874,110 @@ describe('paper slots never become area fills', () => {
         if (f.kind === 'flat') expect(paper.has(f.color.slot)).toBe(false)
         if (f.kind === 'texture') expect(paper.has(f.colors[0].slot)).toBe(false) // group 0 is the fake Plate
       }
+    }
+  })
+})
+
+describe('cell widths', () => {
+  const seg: OrbDoc = { ...FIXTURE, orbType: 'segments' }
+  const many = Array.from({ length: 60 }, (_, i) => `widths-${i}`)
+
+  it('are dealt uneven for some rows and even for others', () => {
+    let uneven = 0
+    let even = 0
+    for (const seed of many) {
+      const s = remix(seg, seed, deps).orb.sectors
+      for (const [w, row] of [[s.widthsA, s.rowA], [s.widthsB, s.rowB]] as const) {
+        if (row.length < 2) continue
+        if (w) {
+          uneven++
+          expect(w).toHaveLength(row.length)
+        } else even++
+      }
+    }
+    expect(uneven).toBeGreaterThan(0)
+    expect(even).toBeGreaterThan(0)
+  })
+
+  it('are part of the structure: the structure sub-lock keeps them', () => {
+    const locked: OrbDoc = {
+      ...withSubLocks({ orb: { structure: true } }),
+      orbType: 'segments',
+      orb: {
+        ...FIXTURE.orb,
+        sectors: {
+          ...FIXTURE.orb.sectors,
+          rowA: [{ kind: 'flat', color: { slot: 1 } }, { kind: 'flat', color: { slot: 2 } }],
+          widthsA: [1, 3],
+        },
+      },
+    }
+    for (const seed of many.slice(0, 12)) {
+      expect(remix(locked, seed, deps).orb.sectors.widthsA).toEqual([1, 3])
+    }
+  })
+})
+
+describe('pool photos prefer the biggest cells', () => {
+  it('a one-photo pool lands in the largest cell most of the time', () => {
+    const doc: OrbDoc = {
+      ...FIXTURE,
+      photoPool: { photos: [{ photoId: 'ph-big', zoom: 1, focusX: 0.5, focusY: 0.5 }], min: 1, max: 1 },
+    }
+    let largest = 0
+    let multi = 0
+    for (let i = 0; i < 200; i++) {
+      const s = remix(doc, `big-${i}`, deps).orb.sectors
+      const cells = [...s.rowA, ...s.rowB]
+      if (cells.length < 2) continue
+      multi++
+      const areas = sectorCellAreas(s.offset, s.rowA.length, s.rowB.length, s.widthsA, s.widthsB)
+      const at = cells.findIndex((f) => f.kind === 'photo')
+      if (areas[at] >= Math.max(...areas) - 1e-9) largest++
+    }
+    // area³ weighting: the largest cell wins well over half the time
+    // (uniform placement would be about 1 in the cell count, ~30%).
+    expect(largest / multi).toBeGreaterThan(0.6)
+  })
+})
+
+describe('the cells sub-lock', () => {
+  const twoCells: OrbDoc = {
+    ...withSubLocks({ orb: { cells: true } }),
+    orbType: 'segments',
+    orb: {
+      ...FIXTURE.orb,
+      sectors: {
+        ...FIXTURE.orb.sectors,
+        rowA: [{ kind: 'flat', color: { slot: 1 } }],
+        rowB: [{ kind: 'flat', color: { slot: 2 } }],
+      },
+    },
+  }
+  const many = Array.from({ length: 40 }, (_, i) => `cells-${i}`)
+
+  it('keeps both rows’ cell counts while the split still re-deals', () => {
+    const angles = new Set<number>()
+    for (const seed of many) {
+      const s = remix(twoCells, seed, deps).orb.sectors
+      expect([s.rowA.length, s.rowB.length]).toEqual([1, 1])
+      angles.add(Math.round(s.angle))
+    }
+    expect(angles.size).toBeGreaterThan(5)
+  })
+
+  it('holds against a photo pool asking for more cells than that', () => {
+    const doc: OrbDoc = {
+      ...twoCells,
+      photoPool: {
+        photos: ['a', 'b', 'c'].map((x) => ({ photoId: `ph-${x}`, zoom: 1, focusX: 0.5, focusY: 0.5 })),
+        min: 3,
+        max: 3,
+      },
+    }
+    for (const seed of many) {
+      const s = remix(doc, seed, deps).orb.sectors
+      expect(s.rowA.length + s.rowB.length).toBe(2)
     }
   })
 })

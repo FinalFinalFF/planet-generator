@@ -44,6 +44,7 @@ import {
   type ShadingLayer,
 } from '../types'
 import { makeRng, type Rng } from './rng'
+import { sectorCellAreas } from './geometry'
 import { DEFAULT_LAYER_MASK, nextId } from './defaults'
 import type { ParsedPattern } from './patterns/parse'
 import { paperSlots, slotsByLightness } from './palettes'
@@ -490,6 +491,7 @@ function placePoolPhotos(
   rowB: SectorFill[],
   picks: { cell: number; photo: number }[],
   countPick: number,
+  areas: number[],
 ): [SectorFill[], SectorFill[]] {
   if (pool.photos.length === 0 || pool.max < 1) return [rowA, rowB]
   const cells = [...rowA, ...rowB]
@@ -503,8 +505,22 @@ function placePoolPhotos(
   const avail = pool.photos.filter((p) => !pinned.has(p.photoId))
   const n = Math.min(target - pinned.size, free.length, avail.length, picks.length)
   const at = (list: unknown[], pick: number) => Math.min(list.length - 1, Math.floor(pick * list.length))
+  // Big cells first: a photo in a sliver reads as a mistake. Each pick is
+  // weighted by area³ — the largest free cell wins most of the time, but not
+  // always, so a 2-photo orb still varies. Pure selection over `pick.cell`.
+  const weightedAt = (pick: number) => {
+    const w = free.map((i) => Math.pow(areas[i] ?? 0, 3))
+    const total = w.reduce((a, b) => a + b, 0)
+    if (!(total > 0)) return at(free, pick)
+    let t = pick * total
+    for (let j = 0; j < free.length; j++) {
+      t -= w[j]
+      if (t <= 0) return j
+    }
+    return free.length - 1
+  }
   for (let k = 0; k < n; k++) {
-    const cellIndex = free.splice(at(free, picks[k].cell), 1)[0]
+    const cellIndex = free.splice(weightedAt(picks[k].cell), 1)[0]
     const photo = avail.splice(at(avail, picks[k].photo), 1)[0]
     cells[cellIndex] = { kind: 'photo', ...photo, locks: cells[cellIndex].locks }
   }
@@ -566,12 +582,16 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   )
 
   // --- sector structure + cell candidates, always full width ---
-  const sectorAngleKind = rng.weighted(['h', 'v', 'free'] as const, [0.44, 0.28, 0.28])
+  // Mostly free angles now (was 44/28/28 h/v/free — three in four orbs cut
+  // square to the frame, 2026-10-13). One weighted draw either way.
+  const sectorAngleKind = rng.weighted(['h', 'v', 'free'] as const, [0.2, 0.15, 0.65])
   const sectorFreeAngle = rng.int(0, 359)
   const sectorAngle =
     sectorAngleKind === 'h' ? 0 : sectorAngleKind === 'v' ? 90 : sectorFreeAngle
   const sectorOffsetDraw = rng.float(-0.45, 0.45)
-  const sectorOffset = rng.bool(0.55) ? 0 : sectorOffsetDraw
+  // A dead-centre chord a quarter of the time (was 55%: half of all orbs
+  // split exactly 50/50).
+  const sectorOffset = rng.bool(0.25) ? 0 : sectorOffsetDraw
   // Cells deal from the whole enabled pool. This used to prefer the tx-
   // procedurals — written when the only file patterns were heavy geometry
   // grids — which silently vetoed every curated file pattern from every
@@ -655,7 +675,13 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   const orbRadius = rng.float(0.5, 0.74)
   const orbGradient = remixGradient(rng, palette, doc.orb.gradient, locks.colors)
   const orbBrandPick = rng.float(0, 1)
-  const strokeEnabled = rng.bool(0.18)
+  // Still drawn (stream unchanged), never dealt on: remix used to add the
+  // orb outline 18% of the time in the palette's lightest slot — usually a
+  // paper white like #EEEDE9 at 25–70% — which read as a faded edge around
+  // the orb, worst on a white Figma canvas (2026-10-13). A deliberate,
+  // hand-set outline is untouched: an orb section lock keeps doc.orb whole.
+  rng.bool(0.18) // the old outline coin — drawn and discarded
+  const strokeEnabled = false
   const strokeWidth = rng.float(1, 4)
   const strokeOpacity = rng.float(0.25, 0.7)
 
@@ -715,15 +741,34 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   // more photos per orb than the rolled structure has cells grows the rows
   // (A first, alternating, up to 3 each) — pure selection; the candidates
   // were drawn at full width.
-  let rowACount = structureLocked ? prevSec.rowA.length : rowACountRoll
-  let rowBCount = structureLocked ? prevSec.rowB.length : rowBCountRoll
-  if (poolLive && !structureLocked) {
+  // The cells sub-lock keeps just the counts; the chord and widths still deal.
+  const countsLocked = structureLocked || subLocks.orb.cells
+  let rowACount = countsLocked ? prevSec.rowA.length : rowACountRoll
+  let rowBCount = countsLocked ? prevSec.rowB.length : rowBCountRoll
+  if (poolLive && !countsLocked) {
     const want = Math.min(pool.min, MAX_SECTOR_CELLS * 2)
     while (rowACount + rowBCount < want) {
       if (rowACount <= rowBCount && rowACount < MAX_SECTOR_CELLS) rowACount++
       else rowBCount++
     }
   }
+  // Cell widths: their own `${seed}-split` stream, drawn at full width every
+  // time, so adding them moved no main-stream draw. About 40% of rows stay
+  // even; the rest get relative widths in 0.55–1.6 (rowEdges floors slivers).
+  const splitRng = makeRng(`${seed}-split`)
+  const widthDraws = [0, 1].map(() => ({
+    even: splitRng.bool(0.4),
+    w: Array.from({ length: MAX_SECTOR_CELLS }, () => splitRng.float(0.55, 1.6)),
+  }))
+  const widthsFor = (row: 0 | 1, count: number): number[] | undefined =>
+    structureLocked
+      ? row === 0
+        ? prevSec.widthsA
+        : prevSec.widthsB
+      : widthDraws[row].even || count < 2
+        ? undefined
+        : widthDraws[row].w.slice(0, count)
+
   const buildRow = (cands: SectorFill[], prevRow: SectorFill[], count: number): SectorFill[] =>
     Array.from({ length: count }, (_, i) => selectCell(cands[i % cands.length], prevRow[i]))
   let sectorRowA = buildRow(rowACands, prevSec.rowA, rowACount)
@@ -762,7 +807,14 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     photo: photoRng.float(0, 1),
   }))
   const countPick = photoRng.float(0, 1)
-  ;[sectorRowA, sectorRowB] = placePoolPhotos(pool, sectorRowA, sectorRowB, picks, countPick)
+  const cellAreas = sectorCellAreas(
+    selOffset,
+    sectorRowA.length,
+    sectorRowB.length,
+    widthsFor(0, sectorRowA.length),
+    widthsFor(1, sectorRowB.length),
+  )
+  ;[sectorRowA, sectorRowB] = placePoolPhotos(pool, sectorRowA, sectorRowB, picks, countPick, cellAreas)
 
   const orbCandidate: Orb = {
     ...doc.orb,
@@ -772,6 +824,8 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       offset: selOffset,
       rowA: sectorRowA,
       rowB: sectorRowB,
+      widthsA: widthsFor(0, sectorRowA.length),
+      widthsB: widthsFor(1, sectorRowB.length),
     },
     cx: subLocks.orb.position ? doc.orb.cx : orbCx,
     cy: subLocks.orb.position ? doc.orb.cy : orbCy,

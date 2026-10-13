@@ -247,8 +247,8 @@ export type SidebarProps = {
   onRandomizeSection: (section: Exclude<LockSection, 'colors'>) => void
   /** The Palette section's dice picks a different palette. */
   onRandomizePalette: () => void
-  /** Open the full-page photo library (favorites, framing, pool picks). */
-  onOpenPhotoLibrary: () => void
+  /** Open the full-page photo library (favorites, framing, pool picks); 'pool' opens on the pool. */
+  onOpenPhotoLibrary: (view?: 'pool') => void
   /** Built-in library plus anything imported this session. */
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
 }
@@ -308,6 +308,8 @@ function SectorRowEditor({
   parsedById,
   patternOptions,
   photoPool,
+  sectorWidths,
+  cellsLock,
   updateDoc,
   onChange,
   onSetTexture,
@@ -320,6 +322,10 @@ function SectorRowEditor({
   parsedById: Map<string, ParsedPattern>
   patternOptions: Array<{ id: string; name: string; imported: boolean }>
   photoPool: PhotoPool
+  /** Both rows' relative cell widths (absent = even). */
+  sectorWidths: { widthsA?: number[]; widthsB?: number[] }
+  /** The "lock the number of cells" sub-lock — one lock for both rows. */
+  cellsLock: { on: boolean; implied: boolean; onToggle: (on: boolean) => void }
   /** Whole-document edits, for photo changes that also touch the pool. */
   updateDoc: (recipe: (d: OrbDoc) => OrbDoc, coalesce?: string) => void
   onChange: (row: SectorFill[], coalesce?: string) => void
@@ -386,6 +392,18 @@ function SectorRowEditor({
       <div className="eyebrow">{label}</div>
       <Segmented
         label="Cells"
+        tools={
+          <PropLock
+            on={cellsLock.on}
+            implied={cellsLock.implied}
+            title={
+              cellsLock.implied && !cellsLock.on
+                ? 'Cell counts pinned by the structure lock (or a locked segment).'
+                : 'Lock the number of cells: remix keeps both rows’ cell counts, and still deals the split angle, position, widths and fills.'
+            }
+            onToggle={cellsLock.onToggle}
+          />
+        }
         value={String(Math.min(3, Math.max(1, row.length)))}
         options={[
           { value: '1', label: '1' },
@@ -394,6 +412,52 @@ function SectorRowEditor({
         ]}
         onChange={(v) => setCount(Number(v))}
       />
+      {row.length > 1 && (
+        <Adv>
+          {(() => {
+            const key = rowKey === 'rowA' ? 'widthsA' : 'widthsB'
+            const stored = rowKey === 'rowA' ? sectorWidths.widthsA : sectorWidths.widthsB
+            const widths =
+              stored && stored.length === row.length ? stored : row.map(() => 1)
+            const setWidth = (i: number, w: number) =>
+              updateDoc(
+                (d) => ({
+                  ...d,
+                  orb: {
+                    ...d.orb,
+                    sectors: { ...d.orb.sectors, [key]: widths.map((x, j) => (j === i ? w : x)) },
+                  },
+                }),
+                `${rowKey}-width-${i}`,
+              )
+            return (
+              <>
+                {widths.map((w, i) => (
+                  <Slider
+                    key={i}
+                    label={`Cell ${i + 1} width`}
+                    value={w}
+                    min={0.3}
+                    max={3}
+                    step={0.05}
+                    onChange={(v) => setWidth(i, v)}
+                  />
+                ))}
+                <button
+                  type="button"
+                  className="btn btn--tiny"
+                  disabled={!stored}
+                  onClick={() =>
+                    updateDoc((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, [key]: undefined } } }))
+                  }
+                >
+                  Even widths
+                </button>
+              </>
+            )
+          })()}
+        </Adv>
+      )}
       {row.map((fill, i) => {
         const parsed = fill.kind === 'texture' ? parsedById.get(fill.patternId) : undefined
         return (
@@ -922,7 +986,7 @@ function OrbSection(props: SidebarProps) {
   // Existence implication: any locked cell pins the structure.
   const cellsLocked =
     [...doc.orb.sectors.rowA, ...doc.orb.sectors.rowB].filter(anyLock).length
-  const activeSubs = (['type', 'size', 'position', 'structure'] as const).filter((k) => sub[k])
+  const activeSubs = (['type', 'size', 'position', 'structure', 'cells'] as const).filter((k) => sub[k])
   const partial = activeSubs.length + cellsLocked
   const partialTitle =
     `Remix may change the orb except: ${[
@@ -1094,6 +1158,12 @@ function OrbSection(props: SidebarProps) {
             onSetTexture={props.onSetSectorTexture}
             onImportPhoto={props.onImportPhoto}
             photoPool={doc.photoPool}
+            sectorWidths={doc.orb.sectors}
+            cellsLock={{
+              on: sub.cells,
+              implied: sub.structure || doc.locks.orb || cellsLocked > 0,
+              onToggle: setSub('cells'),
+            }}
             updateDoc={update}
             onChange={(rowA, coalesce) =>
               update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowA } } }), coalesce)
@@ -1110,6 +1180,12 @@ function OrbSection(props: SidebarProps) {
             onSetTexture={props.onSetSectorTexture}
             onImportPhoto={props.onImportPhoto}
             photoPool={doc.photoPool}
+            sectorWidths={doc.orb.sectors}
+            cellsLock={{
+              on: sub.cells,
+              implied: sub.structure || doc.locks.orb || cellsLocked > 0,
+              onToggle: setSub('cells'),
+            }}
             updateDoc={update}
             onChange={(rowB, coalesce) =>
               update((d) => ({ ...d, orb: { ...d.orb, sectors: { ...d.orb.sectors, rowB } } }), coalesce)
@@ -2433,7 +2509,7 @@ function PhotosSection(props: SidebarProps) {
     >
       <div className="row">
         {library.list.length > 0 && (
-          <button type="button" className="btn" onClick={props.onOpenPhotoLibrary}>
+          <button type="button" className="btn" onClick={() => props.onOpenPhotoLibrary()}>
             Photo library ({library.list.length})
           </button>
         )}
@@ -2538,15 +2614,26 @@ function PhotosSection(props: SidebarProps) {
               )
             })}
           </div>
-          <Adv>
+          {/* Always visible — it was behind "more settings" and read as
+              missing. Undo (⌘Z) brings a cleared pool back, so no confirm. */}
+          <button
+            type="button"
+            className="btn btn--block"
+            title="Remove every photo from this pool (they stay in the library). ⌘Z undoes it."
+            onClick={() => update((d) => ({ ...d, photoPool: { ...d.photoPool, photos: [] } }))}
+          >
+            Clear the pool ({pool.photos.length})
+          </button>
+          {library.list.length > 0 && (
             <button
               type="button"
               className="btn btn--block"
-              onClick={() => update((d) => ({ ...d, photoPool: { ...d.photoPool, photos: [] } }))}
+              title="Open the photo library on the pool: every photo in it, large, with its framing"
+              onClick={() => props.onOpenPhotoLibrary('pool')}
             >
-              Clear the pool
+              View the pool in the library
             </button>
-          </Adv>
+          )}
         </>
       )}
     </Section>

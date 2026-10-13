@@ -350,3 +350,67 @@ export function circleRectIntersectionBBox(
   const by = Math.min(...ys)
   return { x: bx, y: by, w: Math.max(...xs) - bx, h: Math.max(...ys) - by }
 }
+
+/** No cell narrower than this share of its row — slivers read as glitches. */
+export const MIN_CELL_SHARE = 0.15
+
+/**
+ * A row's cell edges as fractions 0…1 across the orb, from relative widths.
+ * Widths that are missing, mismatched with `count`, or non-positive fall back
+ * to an even split; every share is held at or above MIN_CELL_SHARE.
+ */
+export function rowEdges(count: number, widths?: number[]): number[] {
+  const n = Math.max(1, count)
+  const valid = widths && widths.length === n && widths.every((w) => Number.isFinite(w) && w > 0)
+  let shares = valid ? widths.map((w) => w / widths.reduce((a, b) => a + b, 0)) : Array(n).fill(1 / n)
+  if (n > 1 && shares.some((x) => x < MIN_CELL_SHARE)) {
+    // Lift small shares to the floor, taking the difference proportionally
+    // from the rest.
+    const lifted = shares.map((x) => Math.max(MIN_CELL_SHARE, x))
+    const excess = lifted.reduce((a, b) => a + b, 0) - 1
+    const room = lifted.reduce((a, x) => a + (x > MIN_CELL_SHARE ? x - MIN_CELL_SHARE : 0), 0)
+    shares = lifted.map((x) => (x > MIN_CELL_SHARE && room > 0 ? x - (excess * (x - MIN_CELL_SHARE)) / room : x))
+  }
+  const edges = [0]
+  for (const x of shares) edges.push(edges[edges.length - 1] + x)
+  edges[edges.length - 1] = 1
+  return edges
+}
+
+/**
+ * Each sector cell's share of the disc's area — row A's cells, then row B's.
+ * Depends only on the structure (chord offset, row counts, widths): rotation
+ * does not change areas. Grid-sampled over the unit disc; plenty for ranking
+ * cells, which is all remix uses it for (the photo pool prefers big cells).
+ */
+export function sectorCellAreas(
+  offset: number,
+  countA: number,
+  countB: number,
+  widthsA?: number[],
+  widthsB?: number[],
+): number[] {
+  const N = 64
+  const chord = Math.max(-0.95, Math.min(0.95, offset))
+  const rows = [
+    { edges: rowEdges(countA, widthsA), inRow: (y: number) => y < chord },
+    { edges: rowEdges(countB, widthsB), inRow: (y: number) => y >= chord },
+  ]
+  const counts = rows.map((row) => new Array(row.edges.length - 1).fill(0))
+  let total = 0
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const x = -1 + (2 * (i + 0.5)) / N
+      const y = -1 + (2 * (j + 0.5)) / N
+      if (x * x + y * y > 1) continue
+      total++
+      const ri = rows[0].inRow(y) ? 0 : 1
+      const u = (x + 1) / 2
+      const edges = rows[ri].edges
+      let ci = 0
+      while (ci < edges.length - 2 && u >= edges[ci + 1]) ci++
+      counts[ri][ci]++
+    }
+  }
+  return [...counts[0], ...counts[1]].map((c) => c / total)
+}

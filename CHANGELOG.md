@@ -12,6 +12,91 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: lock the number of cells
+
+Pete wanted a batch of two-cell orbs, one cell a photo. The only lock was
+`orb.structure`, which also pins the chord angle, offset and widths — a
+batch of identical splits. New sub-lock `orb.cells` keeps just both rows'
+counts (padlock beside each row's Cells control; one lock for both rows,
+implied by the structure lock or a locked segment). It also stops the photo
+pool from growing rows. Passes the vocabulary test — it is the user's own
+sentence. Tested and sabotage-checked; verified end to end: rows 1+1, cells
+locked, 1 photo per orb → a batch of two-cell orbs, one photo each, varied
+splits.
+
+### Fixed: a faded outline around exported orbs
+
+Pete saw a faint outline around orbs in Figma. It was the orb **Outline**
+(`orb.stroke`), which remix switched on 18% of the time in the palette's
+lightest slot — on RSAC Spectrum the paper white #EEEDE9 — at 25–70%
+opacity: on a white Figma canvas, a grey ghost edge. Remix no longer turns
+it on (the coin is still drawn, so the stream is unchanged; 0 of 40 remixes
+now carry one). It stays available by hand, and an orb section lock keeps a
+deliberate one.
+
+### Changed: pool photos go in big cells, and zoom a little to keep the subject
+
+Pete saw subjects cut by a segment edge and photos dealt into slivers.
+
+- **Placement weighs cell area³** (`sectorCellAreas` — grid-sampled disc
+  shares from offset, row counts and widths; rotation doesn't change area).
+  Pure selection over the existing `pick.cell` draw, so seeds stay stable.
+  A one-photo pool now lands in the largest cell well over 60% of the time
+  (tested; uniform placement fails the test).
+- **Auto-zoom for the focal point.** At plain cover size the
+  keep-the-box-covered clamp often beat the focal point in long thin cells
+  and slid the face to the cut. The renderer now zooms in just enough for
+  the focal point to land within 25% of the cell's size of its centroid,
+  capped at 1.6× cover. First try aimed at the exact centroid with a 3× cap
+  — Pete: "zooming way too much" (faces filled the cell). Reverted the same
+  hour to the slack + 1.6× version.
+
+### Added: see the current pool — "in pool" view and a visible Clear
+
+Pete couldn't clear the pool (the button was behind the Photos section's
+"more settings") and couldn't see the pool at a useful size. Clear is now
+always visible in the sidebar and on the Photos page (⌘Z undoes it, so no
+confirm), and the Photos page has an **in pool** view listing the open
+document's pool — hidden photos included, since they are in it and can be
+taken out there. "View the pool in the library" in the sidebar opens on it.
+
+### Changed: more angle and proportion variety in segments
+
+Pete: nearly every segment split was square to the frame and 50/50 (or
+25/25/25/25), with only the odd exception. Measured cause: remix dealt the
+split angle 44% horizontal, 28% vertical, 28% free; centred the chord 55% of
+the time; and cells within a row were *always* equal widths (the original
+"even splits, only the chord is authored" rule).
+
+- Angle odds now 20/15/65 h/v/free and a centred chord 25% — re-weighted
+  selections over the same draws (verified over 1,000 remixes: 21% / 16% /
+  63%, 25% centred). Outputs change; the stream does not.
+- **Per-row cell widths** (`SectorConfig.widthsA/widthsB`, relative, absent
+  = even), reversing the even-splits rule. Dealt from a separate
+  `${seed}-split` stream (about 40% of rows stay even, the rest 0.55–1.6
+  relative), pinned by the structure lock (tested, sabotage-confirmed),
+  editable as per-cell width sliders under Structure's more settings.
+  `rowEdges` floors any cell at 15% so no slivers.
+- Red herring worth recording: a 15-orb sample (`variety-1…15`) came out
+  9× horizontal and looked like seed correlation. It is not — sequential
+  seeds' draws spread like independent uniforms, and the same prefix over
+  1,000 seeds gives 20.7%. Small samples lie; measure in the hundreds.
+- Not done: cuts that aren't perpendicular to the chord. Cells are
+  rectangles in the rotated frame, and the intersection/bbox/centroid
+  geometry assumes it; genuinely angular wedges need convex-polygon ∩ circle
+  geometry.
+
+### Added: named photo collections, and imports that leave the rest alone
+
+Pete dropped nine photos into `photo-library/inbox` and asked for them as a
+collection called "San Francisco". `build.swift` gained `<dir> --as "Name"`
+(the name becomes the collection tag and id prefix; a named collection counts
+as selects, being hand-picked). Found while doing it: the builder rewrote the
+catalog from only the sources it was given, so importing one folder would
+have dropped all 4,935 existing photos. It now keeps every existing entry
+whose source is not part of the run, in its original order (verified
+byte-identical). Imported and published; the hosted deploy uploaded 20 files.
+
 ### Fixed: texture cells shifted or too small for their segment
 
 Pete saw texture segments with offset plate edges, gaps, and ring strokes

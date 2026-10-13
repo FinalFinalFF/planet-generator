@@ -170,8 +170,13 @@ The `segments` type renders the collage from the 2026-08-25 client comps: one ch
 disc into two rows, each row splits crosswise into 1–3 equal cells, each cell
 filled independently (`flat` ink, 2-stop `ramp`, `texture`, or `photo`). Load-bearing:
 
-- **Cell geometry is derived** — even splits; only the chord's angle and offset
-  are authored. Same philosophy as the slices' derived radii.
+- **Cell geometry is derived** — the chord's angle and offset plus per-row
+  relative cell widths (`widthsA`/`widthsB`; absent = even; `rowEdges` floors
+  slivers at 15%). Widths come from a separate `${seed}-split` stream and are
+  part of the structure (the structure lock pins them). Cuts are always
+  perpendicular to the chord: cells are rects in the rotated frame, which is
+  what `circleRectIntersectionPath`/`…BBox` assume. Remix deals mostly free
+  angles (20/15/65 h/v/free) and a centred chord only 25% of the time.
 - **Never nest clip paths.** Chrome mis-rasterizes nested clip intersections
   when the host `<svg>` is CSS-scaled — which is how the editor stage, batch
   cells, and thumbnails all render (correct standalone, broken scaled; see
@@ -221,7 +226,11 @@ keeps SVG export a pure serialization and lets PNG rasterization load it — do
 not switch it to blob: URLs. Placement is cover-fit over the cell's visible
 box, with the focal point (`focusX`/`focusY`) aimed at the cell's area
 centroid and clamped to keep the box covered — not `object-position` over the
-box, which cropped subjects in wedge cells.
+box, which cropped subjects in wedge cells. The renderer
+auto-zooms (≤ 1.6× cover) just enough to bring the focal point within 25% of
+the cell size of the centroid; a 3×/exact-centroid version over-zoomed faces
+and was reverted. Remix places pool photos weighted by cell area³
+(`sectorCellAreas`), so they rarely land in slivers.
 
 `doc.photoPool` (`{ photos, min, max }`) is a standing preference like
 `colorSource`, not a lock. Every remix places a count in [min, max] of
@@ -298,7 +307,8 @@ Locks come in three levels, all absolute (see Remix determinism below):
   accents, background.
 - **Sub-locks** (`doc.subLocks`) — one user-meaningful property each:
   `orb.type`, `orb.size`, `orb.position` (cx+cy as one), `orb.structure`
-  (chord + both row counts), `patterns.count` (absorbed the old
+  (chord + both row counts + widths), `orb.cells` (both row counts only —
+  the chord, offset and widths still deal; "lock the number of cells"), `patterns.count` (absorbed the old
   `lockPatternCount` field at v4), `colors.palette` (Remix All keeps the
   palette, still re-deals assignments — applied in `App.doRemixAll`).
 - **Property locks on objects** — `layer.locks` (pattern/color/scale/position/

@@ -1,7 +1,12 @@
 // Builds the local photo library the editor and orbgen read from
 // `photo-library/` (untracked — client photos never go into this public repo).
 //
-//   swift tools/photo-library/build.swift <out-dir> <source-dir> [<source-dir>…]
+//   swift tools/photo-library/build.swift <out-dir> <source-dir> [--as "Collection"] [<source-dir> …]
+//
+// Each source becomes a collection, named after its folder unless `--as`
+// follows it (e.g. an `inbox` folder imported as "San Francisco"). A named
+// collection is hand-picked, so its photos count as selects. Sources not
+// given in this run keep their existing catalog entries untouched.
 //
 // For every JPEG/PNG/HEIC under the sources, once:
 //   full/<id>.jpg    long edge ≤ 2048 px, EXIF orientation baked in, no metadata
@@ -48,19 +53,33 @@ struct Catalog: Codable {
 
 let args = CommandLine.arguments
 guard args.count >= 3 else {
-  FileHandle.standardError.write("usage: build.swift <out-dir> <source-dir>…\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: build.swift <out-dir> <source-dir> [--as \"Collection\"] …\n".data(using: .utf8)!)
   exit(2)
 }
 let outDir = URL(fileURLWithPath: args[1])
-let sources = args.dropFirst(2).map { URL(fileURLWithPath: $0) }
+// Sources, each optionally renamed with a following `--as "Name"`.
+var sources: [(url: URL, name: String, named: Bool)] = []
+var rest = Array(args.dropFirst(2))
+while !rest.isEmpty {
+  let path = rest.removeFirst()
+  let url = URL(fileURLWithPath: path)
+  if rest.first == "--as", rest.count >= 2 {
+    rest.removeFirst()
+    sources.append((url, rest.removeFirst(), true))
+  } else {
+    sources.append((url, url.lastPathComponent, false))
+  }
+}
 let fm = FileManager.default
 try fm.createDirectory(at: outDir.appendingPathComponent("full"), withIntermediateDirectories: true)
 try fm.createDirectory(at: outDir.appendingPathComponent("thumbs"), withIntermediateDirectories: true)
 
 let catalogURL = outDir.appendingPathComponent("catalog.json")
 var existing: [String: Entry] = [:]
+var existingOrder: [Entry] = []
 if let data = try? Data(contentsOf: catalogURL), let cat = try? JSONDecoder().decode(Catalog.self, from: data) {
   for e in cat.photos { existing[e.id] = e }
+  existingOrder = cat.photos
 }
 
 func slug(_ s: String) -> String {
@@ -148,11 +167,12 @@ struct Candidate {
   var pixels: Int
 }
 
+var namedCollections = Set<String>()
 var candidatesByKey: [String: Candidate] = [:]
 var order: [String] = []
 let exts: Set<String> = ["jpg", "jpeg", "png", "heic", "tif", "tiff"]
-for source in sources {
-  let sourceName = source.lastPathComponent
+for (source, sourceName, named) in sources {
+  if named { namedCollections.insert(sourceName) }
   let sourceSlug = slug(sourceName)
   guard let walker = fm.enumerator(at: source, includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
   for case let url as URL in walker {
@@ -191,7 +211,8 @@ DispatchQueue.concurrentPerform(iterations: candidates.count) { i in
     let c = candidates[i]
     let fullURL = outDir.appendingPathComponent("full/\(c.id).jpg")
     let thumbURL = outDir.appendingPathComponent("thumbs/\(c.id).jpg")
-    let isSelect = c.tags.contains { $0.lowercased().contains("select") || $0.lowercased().contains("edit") }
+    let isSelect = namedCollections.contains(c.source)
+      || c.tags.contains { $0.lowercased().contains("select") || $0.lowercased().contains("edit") }
     var entry: Entry?
     if var prior = existing[c.id], fm.fileExists(atPath: fullURL.path), fm.fileExists(atPath: thumbURL.path) {
       prior.tags = c.tags
@@ -217,10 +238,15 @@ DispatchQueue.concurrentPerform(iterations: candidates.count) { i in
   }
 }
 
-let photos = results.compactMap { $0 }
+// Keep every existing photo whose source was not part of this run, so
+// importing one folder never drops the rest of the library.
+let thisRun = Set(sources.map { $0.name })
+let kept = existingOrder.filter { !thisRun.contains($0.source) }
+let processed = results.compactMap { $0 }
+let photos = kept + processed
 let catalog = Catalog(
   version: 1, generatedAt: ISO8601DateFormatter().string(from: Date()), photos: photos)
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]
 try encoder.encode(catalog).write(to: catalogURL)
-FileHandle.standardError.write("wrote \(photos.count) photos to \(catalogURL.path) (\(candidates.count - photos.count) failed)\n".data(using: .utf8)!)
+FileHandle.standardError.write("wrote \(photos.count) photos to \(catalogURL.path) (\(processed.count) from this run, \(kept.count) kept, \(candidates.count - processed.count) failed)\n".data(using: .utf8)!)

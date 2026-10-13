@@ -39,7 +39,7 @@ import {
 import * as storage from './lib/storage'
 import { BatchPanel, type BatchCell } from './ui/BatchPanel'
 import { LibraryPanel } from './ui/LibraryPanel'
-import { PhotoLibraryPanel } from './ui/PhotoLibraryPanel'
+import { PhotoLibraryPanel, type View as PhotoLibraryView } from './ui/PhotoLibraryPanel'
 import {
   EMPTY_PREFS,
   PhotoPrefsContext,
@@ -129,6 +129,7 @@ export default function App() {
   const [batchRegen, setBatchRegen] = useState(0)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [photoLibraryOpen, setPhotoLibraryOpen] = useState(false)
+  const [photoLibraryView, setPhotoLibraryView] = useState<PhotoLibraryView>('selects')
   // Library curation: excluded pattern ids. Non-destructive — a document
   // already wearing an excluded pattern keeps rendering and re-selecting it.
   const [disabledPatterns, setDisabledPatterns] = useState<Set<string>>(
@@ -1175,6 +1176,7 @@ export default function App() {
         }}
         photoLibraryOpen={photoLibraryOpen}
         onTogglePhotoLibrary={() => {
+          setPhotoLibraryView('selects')
           setPhotoLibraryOpen((v) => !v)
           setBatchOpen(false)
           setLibraryOpen(false)
@@ -1211,7 +1213,8 @@ export default function App() {
         onAddPatternLayer={onAddPatternLayer}
         onSetLayerPattern={onSetLayerPattern}
         onSetSectorTexture={onSetSectorTexture}
-        onOpenPhotoLibrary={() => {
+        onOpenPhotoLibrary={(view) => {
+          setPhotoLibraryView(view ?? 'selects')
           setPhotoLibraryOpen(true)
           setBatchOpen(false)
           setLibraryOpen(false)
@@ -1264,6 +1267,8 @@ export default function App() {
               ),
             )
           }
+          onClearPool={() => update((d) => ({ ...d, photoPool: { ...d.photoPool, photos: [] } }))}
+          initialView={photoLibraryView}
           onClose={() => setPhotoLibraryOpen(false)}
         />
       )}

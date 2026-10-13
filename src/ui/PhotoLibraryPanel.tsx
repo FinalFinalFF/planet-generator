@@ -14,7 +14,7 @@ import { framingFor, usePhotoPrefs } from '../lib/photoPrefs'
 import { FocalPointPicker } from './FocalPointPicker'
 import { Slider } from './controls'
 
-type View = 'all' | 'selects' | 'favorites' | 'hidden'
+export type View = 'pool' | 'all' | 'selects' | 'favorites' | 'hidden'
 
 const PAGE = 120
 
@@ -23,13 +23,23 @@ export type PhotoLibraryPanelProps = {
   poolIds: Set<string>
   onTogglePool: (meta: PhotoMeta, on: boolean) => void
   onAddToPool: (metas: PhotoMeta[]) => void
+  onClearPool: () => void
+  /** Which view to open on — the sidebar's "View pool" opens on the pool. */
+  initialView?: View
   onClose: () => void
 }
 
-export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose }: PhotoLibraryPanelProps) {
+export function PhotoLibraryPanel({
+  poolIds,
+  onTogglePool,
+  onAddToPool,
+  onClearPool,
+  initialView,
+  onClose,
+}: PhotoLibraryPanelProps) {
   const library = usePhotoLibrary()
   const { prefs, backend, setFavorite, setHidden, reframe, resetFraming } = usePhotoPrefs()
-  const [view, setView] = useState<View>('selects')
+  const [view, setView] = useState<View>(initialView ?? 'selects')
   const [tag, setTag] = useState('')
   const [query, setQuery] = useState('')
   const [shown, setShown] = useState(PAGE)
@@ -48,14 +58,18 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase()
     return library.list.filter((m) => {
-      if (view === 'hidden' ? !hidden.has(m.id) : hidden.has(m.id)) return false
+      // The pool view shows the open document's pool as it is — hidden
+      // photos included, since they are in it and can be taken out here.
+      if (view === 'pool') {
+        if (!poolIds.has(m.id)) return false
+      } else if (view === 'hidden' ? !hidden.has(m.id) : hidden.has(m.id)) return false
       if (view === 'selects' && !(m.selects || m.origin === 'upload')) return false
       if (view === 'favorites' && !favorites.has(m.id)) return false
       if (tag && !m.tags.includes(tag)) return false
       if (q && !m.name.toLowerCase().includes(q) && !m.tags.some((t) => t.toLowerCase().includes(q))) return false
       return true
     })
-  }, [library.list, view, tag, query, favorites, hidden])
+  }, [library.list, view, tag, query, favorites, hidden, poolIds])
 
   // Reset paging whenever the filter changes.
   useEffect(() => setShown(PAGE), [view, tag, query])
@@ -112,6 +126,7 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
   }, [selectedId])
 
   const counts = {
+    pool: poolIds.size,
     all: library.list.filter((m) => !hidden.has(m.id)).length,
     selects: library.list.filter((m) => !hidden.has(m.id) && (m.selects || m.origin === 'upload')).length,
     favorites: library.list.filter((m) => favorites.has(m.id) && !hidden.has(m.id)).length,
@@ -137,7 +152,7 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
           {backend.shared ? (backend.writable ? 'shared curation' : 'shared curation, read-only') : 'curation in this browser'}
         </span>
         <div className="seg" role="group" aria-label="Show">
-          {(['selects', 'favorites', 'all', 'hidden'] as View[]).map((v) => (
+          {(['pool', 'selects', 'favorites', 'all', 'hidden'] as View[]).map((v) => (
             <button
               key={v}
               type="button"
@@ -145,7 +160,7 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
               aria-pressed={view === v}
               onClick={() => setView(v)}
             >
-              {v} ({counts[v]})
+              {v === 'pool' ? 'in pool' : v} ({counts[v]})
             </button>
           ))}
         </div>
@@ -172,6 +187,15 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
         <button
           type="button"
           className="btn"
+          disabled={poolIds.size === 0}
+          title="Remove every photo from the open document's pool (they stay in the library). ⌘Z undoes it."
+          onClick={onClearPool}
+        >
+          Clear pool
+        </button>
+        <button
+          type="button"
+          className="btn"
           disabled={items.length === 0}
           title="Add 12 random photos from this view to the open document's pool"
           onClick={() => {
@@ -194,7 +218,9 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
         <div className="photolib__scroll">
           {items.length === 0 ? (
             <div className="note" style={{ padding: 15 }}>
-              {view === 'favorites'
+              {view === 'pool'
+                ? 'The pool is empty — add photos from the other views (P, or double-click).'
+                : view === 'favorites'
                 ? 'No favorites yet — select a photo and press F (or ★) to favorite it.'
                 : view === 'hidden'
                   ? 'Nothing hidden. Hidden photos stay out of every view and every random pick.'

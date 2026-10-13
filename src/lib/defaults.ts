@@ -82,6 +82,8 @@ export function cloneSectors(s: SectorConfig): SectorConfig {
     ...s,
     rowA: s.rowA.map((f) => ({ ...f })),
     rowB: s.rowB.map((f) => ({ ...f })),
+    widthsA: s.widthsA ? [...s.widthsA] : undefined,
+    widthsB: s.widthsB ? [...s.widthsB] : undefined,
   }
 }
 
