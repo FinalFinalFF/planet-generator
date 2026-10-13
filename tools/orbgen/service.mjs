@@ -14,6 +14,7 @@
  *   POST /v1/figma/place           → body: GenerateRequest (+ photoPath, layout, as)
  *   GET  /v1/figma/status          → is the Figma plugin connected?
  *   GET  /v1/library?search=&tag=&selects=1&limit=  → search the photo library
+ *   GET  /photo-library/prefs      → shared curation; POST a diff to change it
  *   GET  /photo-library/*          → the local photo library (catalog, thumbs, full)
  *   GET  /v1/bridge/next?wait=25   → (plugin) long-poll for the next placement job
  *   POST /v1/bridge/result/:id     → (plugin) report a job's outcome
@@ -27,6 +28,7 @@ import { homedir } from 'node:os'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Renderer } from './chrome.mjs'
+import { applyPrefsDiff, emptyPrefs, sanitizePrefs } from '../photo-library/prefs-merge.mjs'
 
 export const VERSION = '0.1.0'
 export const DEFAULT_PORT = Number(process.env.ORBGEN_PORT) || 7331
@@ -371,15 +373,21 @@ export class Orbgen {
       const m = /^\/v1\/bridge\/result\/([\w-]+)$/.exec(url.pathname)
       if (m && req.method === 'POST') return json(200, { ok: this.bridgeResult(m[1], await readBody()) })
       if (url.pathname.startsWith('/v1/')) return json(404, { error: `No route ${req.method} ${url.pathname}` })
-      if (url.pathname === '/photo-library/prefs.json' && req.method === 'PUT') {
-        // The editor saves app-level photo prefs here (favorites, hidden,
-        // site-wide framing); the library tools and api.html read them back.
-        if (!existsSync(PHOTO_LIBRARY)) return json(400, { error: 'No photo library' })
-        const body = await readBody()
+      if (url.pathname === '/photo-library/prefs') {
+        // Shared photo curation — same GET / POST-a-diff protocol as the dev
+        // server and the hosted library (tools/photo-library/prefs-merge.mjs).
+        if (!existsSync(PHOTO_LIBRARY)) return json(404, { error: 'No photo library' })
+        const file = join(PHOTO_LIBRARY, 'prefs.json')
+        const current = existsSync(file)
+          ? sanitizePrefs(JSON.parse(await readFile(file, 'utf8')))
+          : emptyPrefs()
+        if (req.method === 'GET') return json(200, current)
+        if (req.method !== 'POST') return json(405, { error: 'GET or POST' })
+        const next = applyPrefsDiff(current, await readBody())
         const tmp = join(PHOTO_LIBRARY, '.prefs.json.tmp')
-        await writeFile(tmp, JSON.stringify(body, null, 1))
-        await rename(tmp, join(PHOTO_LIBRARY, 'prefs.json'))
-        return void res.writeHead(204).end()
+        await writeFile(tmp, JSON.stringify(next, null, 1))
+        await rename(tmp, file)
+        return json(200, next)
       }
       if (url.pathname.startsWith('/photo-library/')) {
         return this.#serveFile(PHOTO_LIBRARY, url.pathname.slice('/photo-library'.length), res)

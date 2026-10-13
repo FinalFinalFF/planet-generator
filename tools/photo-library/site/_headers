@@ -1,0 +1,9 @@
+/*
+  X-Robots-Tag: noindex, nofollow, noarchive, noimageindex
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=86400
+  Referrer-Policy: no-referrer
+/catalog.json
+  Cache-Control: public, max-age=300
+/prefs.json
+  Cache-Control: no-store

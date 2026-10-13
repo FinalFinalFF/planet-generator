@@ -28,7 +28,7 @@ export type PhotoLibraryPanelProps = {
 
 export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose }: PhotoLibraryPanelProps) {
   const library = usePhotoLibrary()
-  const { prefs, setFavorite, setHidden, reframe, resetFraming } = usePhotoPrefs()
+  const { prefs, backend, setFavorite, setHidden, reframe, resetFraming } = usePhotoPrefs()
   const [view, setView] = useState<View>('selects')
   const [tag, setTag] = useState('')
   const [query, setQuery] = useState('')
@@ -125,6 +125,17 @@ export function PhotoLibraryPanel({ poolIds, onTogglePool, onAddToPool, onClose 
     <div className="batch photolib" role="dialog" aria-label="Photo library">
       <div className="batch__bar">
         <span className="batch__title">Photo library</span>
+        <span
+          className="section__hint"
+          title={
+            backend.shared
+              ? 'Favorites, hidden photos and focal points are shared with everyone using this library.'
+              : 'Favorites, hidden photos and focal points are saved in this browser only.'
+          }
+        >
+          {backend.remote ? 'team library' : 'local library'} ·{' '}
+          {backend.shared ? (backend.writable ? 'shared curation' : 'shared curation, read-only') : 'curation in this browser'}
+        </span>
         <div className="seg" role="group" aria-label="Show">
           {(['selects', 'favorites', 'all', 'hidden'] as View[]).map((v) => (
             <button

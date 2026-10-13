@@ -370,10 +370,13 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
         )
         // Cover-fit over the cell's visible box: sized to its diagonal so any
         // texture rotation still covers, centered on the box's rotated center.
+        // Scale never drops below 1 here: below it the tile stopped covering
+        // the cell, which showed as offset plate edges and gaps once every
+        // texture cell carried an opaque plate (2026-10-13).
         const bw = Math.max(1, gx1 - gx0)
         const bh = Math.max(1, gy1 - gy0)
         const bc = rotateAbout((gx0 + gx1) / 2, (gy0 + gy1) / 2, s.angle, cx, cy)
-        const k = (Math.hypot(bw, bh) * Math.max(0.05, fill.scale)) /
+        const k = (Math.hypot(bw, bh) * Math.max(1, fill.scale)) /
           Math.min(parsed.width, parsed.height)
         const transform =
           `translate(${n(bc.x)} ${n(bc.y)}) rotate(${n(fill.rotation)}) ` +
@@ -398,11 +401,17 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
             <path d={cellD} fill="#ffffff" />
           </mask>,
         )
-        // A pattern with no plate of its own (5 of the library) would leave
-        // the cell's gaps transparent — read as a hole in the collage. Give
-        // it a ground from the end of the palette its inks are not.
+        // Every texture cell paints a ground — the exact cell shape — before
+        // its artwork: the plate's own color when it has a visible one, else
+        // the palette end its inks are not. Some patterns' artwork stops short
+        // of their tile edge, and a pattern with no plate (5 of the library)
+        // has nothing behind its ink; either way a gap read as a hole.
+        const plateGroup = parsed.groups.find((g) => g.isBackground)
+        const platePaint = plateGroup ? paints[plateGroup.index] : undefined
         let ground: string | null = null
-        if (!parsed.groups.some((g) => g.isBackground)) {
+        if (platePaint && platePaint.alpha > 0.001) {
+          ground = withAlpha(platePaint.hex, platePaint.alpha)
+        } else if (!plateGroup) {
           const visible = paints.filter((p) => p.alpha > 0.001)
           const meanL = visible.length ? visible.reduce((acc, p) => acc + luminance(p.hex), 0) / visible.length : 1
           const order = slotsByLightness(palette)

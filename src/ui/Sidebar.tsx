@@ -555,8 +555,8 @@ function SectorRowEditor({
                 <Adv>
                   <Slider
                     label="Scale"
-                    value={fill.scale}
-                    min={0.2}
+                    value={Math.max(1, fill.scale)}
+                    min={1}
                     max={4}
                     tools={
                       <AdvLock

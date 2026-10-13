@@ -43,11 +43,15 @@ import { PhotoLibraryPanel } from './ui/PhotoLibraryPanel'
 import {
   EMPTY_PREFS,
   PhotoPrefsContext,
+  applyPrefsDiff,
+  combineDiffs,
   framingFor,
   loadPhotoPrefs,
-  savePhotoPrefs,
+  pushPrefsDiff,
   type PhotoPrefs,
   type PhotoPrefsApi,
+  type PrefsBackend,
+  type PrefsDiff,
 } from './lib/photoPrefs'
 import { withPhotoFraming, withPoolPhoto } from './lib/photoPool'
 import { BUILTIN_PRESETS, defaultPresetDoc } from './lib/presets'
@@ -65,6 +69,7 @@ import {
   type PhotoLibrary,
   type PhotoMeta,
 } from './lib/photos'
+import { PHOTO_SOURCE } from './lib/photoSource'
 
 const SECTION_KEYS = ['orb', 'photos', 'palette', 'accents', 'canvas', 'export'] as const
 
@@ -359,54 +364,82 @@ export default function App() {
   }, [referencedPhotos, photoLibrary, loadedLibrary, notify])
 
   /* ---- app-level photo curation: favorites, hidden, site-wide framing ---- */
-  const [photoPrefs, setPhotoPrefs] = useState<PhotoPrefs>(EMPTY_PREFS)
-  const prefsOnDisk = useRef(false)
-  const prefsLoaded = useRef(false)
+  // `prefsBase` is the last state the library's /prefs endpoint (or this
+  // browser) confirmed; `pending` holds local changes not yet confirmed. What
+  // the UI shows is base + pending, so edits are instant and a teammate's
+  // concurrent edits arrive on the next poll without clobbering ours.
+  const [prefsBase, setPrefsBase] = useState<PhotoPrefs>(EMPTY_PREFS)
+  const [pending, setPending] = useState<PrefsDiff[]>([])
+  const backend = useRef<PrefsBackend>({ shared: false, writable: true })
+  const [backendState, setBackendState] = useState<PrefsBackend>(backend.current)
+  const inflight = useRef(false)
+  const photoPrefs = useMemo(() => pending.reduce(applyPrefsDiff, prefsBase), [prefsBase, pending])
+
   useEffect(() => {
-    loadPhotoPrefs().then(({ prefs, onDisk }) => {
-      prefsOnDisk.current = onDisk
-      prefsLoaded.current = true
-      setPhotoPrefs(prefs)
-    })
+    let live = true
+    const refresh = () =>
+      loadPhotoPrefs().then((r) => {
+        if (!live) return
+        backend.current = r.backend
+        setBackendState(r.backend)
+        setPrefsBase(r.prefs)
+      })
+    refresh()
+    // Shared curation: pick up teammates' edits.
+    const t = setInterval(() => backend.current.shared && refresh(), 60000)
+    return () => {
+      live = false
+      clearInterval(t)
+    }
   }, [])
-  // Debounced save; the disk copy (when the library is served locally) is
-  // what orbgen reads, so favorites and framing are shared with the API.
+
+  // Debounced flush of pending changes as one combined diff.
   useEffect(() => {
-    if (!prefsLoaded.current) return
-    const t = setTimeout(
-      () => void savePhotoPrefs(photoPrefs, prefsOnDisk.current || catalog.length > 0),
-      400,
-    )
+    if (pending.length === 0 || inflight.current) return
+    const t = setTimeout(() => {
+      const batch = pending
+      inflight.current = true
+      pushPrefsDiff(combineDiffs(batch), backend.current)
+        .then((merged) => {
+          setPrefsBase(merged)
+          setPending((p) => p.slice(batch.length))
+        })
+        .catch((err) => {
+          notify(`Photo curation not saved: ${err instanceof Error ? err.message : err}`, true)
+          setPending((p) => p.slice(batch.length))
+        })
+        .finally(() => (inflight.current = false))
+    }, 500)
     return () => clearTimeout(t)
-  }, [photoPrefs, catalog.length])
+  }, [pending, notify])
 
   const photoPrefsApi = useMemo<PhotoPrefsApi>(() => {
-    const toggle = (list: string[], id: string, on: boolean) =>
-      on ? (list.includes(id) ? list : [...list, id]) : list.filter((x) => x !== id)
+    const readOnly = backend.current.shared && !backend.current.writable
+    const queue = (d: PrefsDiff) => {
+      if (readOnly) {
+        notify('Photo curation is read-only on this library for now', true)
+        return
+      }
+      setPending((p) => [...p, d])
+    }
     return {
       prefs: photoPrefs,
-      setFavorite: (id, on) => setPhotoPrefs((p) => ({ ...p, favorites: toggle(p.favorites, id, on) })),
-      setHidden: (id, on) => setPhotoPrefs((p) => ({ ...p, hidden: toggle(p.hidden, id, on) })),
+      backend: { ...backendState, remote: PHOTO_SOURCE.remote },
+      setFavorite: (id, on) => queue({ favorites: on ? { add: [id] } : { remove: [id] } }),
+      setHidden: (id, on) => queue({ hidden: on ? { add: [id] } : { remove: [id] } }),
       reframe: (id, framing, coalesce) => {
         const meta = photoLibrary.byId.get(id)
-        setPhotoPrefs((p) => ({
-          ...p,
-          framing: { ...p.framing, [id]: { ...framingFor(meta, p, id), ...framing } },
-        }))
+        queue({ framing: { set: { [id]: { ...framingFor(meta, photoPrefs, id), ...framing } } } })
         // The open document follows: pool entry and every cell showing it.
         update((d) => withPhotoFraming(d, id, framing), coalesce)
       },
       resetFraming: (id) => {
         const meta = photoLibrary.byId.get(id)
-        setPhotoPrefs((p) => {
-          const framing = { ...p.framing }
-          delete framing[id]
-          return { ...p, framing }
-        })
+        queue({ framing: { remove: [id] } })
         update((d) => withPhotoFraming(d, id, { zoom: 1, focusX: meta?.focusX ?? 0.5, focusY: meta?.focusY ?? 0.5 }))
       },
     }
-  }, [photoPrefs, photoLibrary, update])
+  }, [photoPrefs, photoLibrary, update, notify, backendState])
 
   const onImportPhoto = useCallback(
     async (file: File): Promise<Photo | null> => {

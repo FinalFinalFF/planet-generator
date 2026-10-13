@@ -46,7 +46,7 @@ import {
 import { makeRng, type Rng } from './rng'
 import { DEFAULT_LAYER_MASK, nextId } from './defaults'
 import type { ParsedPattern } from './patterns/parse'
-import { slotsByLightness } from './palettes'
+import { paperSlots, slotsByLightness } from './palettes'
 import { PICKABLE_BRAND_GRADIENTS, brandGradientFor } from './brand'
 
 export type RemixDeps = {
@@ -86,6 +86,8 @@ type Deck = {
   mid: number[]
   light: number[]
   all: number[]
+  /** Near-white neutrals — kept out of area fills (see `paperSlots`). */
+  paper: Set<number>
 }
 
 function buildDeck(palette: Palette): Deck {
@@ -96,7 +98,14 @@ function buildDeck(palette: Palette): Deck {
     mid: byL.slice(third, byL.length - third).length ? byL.slice(third, byL.length - third) : byL,
     light: byL.slice(-third).reverse(),
     all: byL,
+    paper: paperSlots(palette),
   }
+}
+
+/** A pool without its paper slots — unless that would empty it. */
+function withoutPaper(pool: number[], deck: Deck): number[] {
+  const kept = pool.filter((s) => !deck.paper.has(s))
+  return kept.length > 0 ? kept : pool
 }
 
 /** A run of adjacent-in-lightness slots, which is what reads as a sweep. */
@@ -573,8 +582,10 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     const kind = rng.weighted(['flat', 'ramp', 'texture'] as const, [0.4, 0.2, 0.4])
     // Never deal the ground slot as a flat cell: the background is almost
     // always deck.dark[0], and a cell in the same ink reads as a bite taken
-    // out of the disc rather than a sector.
-    const flatPool = deck.all.filter((s) => s !== deck.dark[0])
+    // out of the disc rather than a sector. Nor a paper slot (near-white
+    // neutral), which reads as a missing cell — see `paperSlots`. Pool
+    // filtering is selection: `pick` draws once whatever the pool's size.
+    const flatPool = withoutPaper(deck.all.filter((s) => s !== deck.dark[0]), deck)
     const slotA = rng.pick(flatPool.length > 0 ? flatPool : deck.all)
     const slotB = rng.pick(deck.light)
     const rampAngle = rng.int(0, 359)
@@ -587,11 +598,18 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // be a coin flip). The coin is still drawn and now picks the plate's
       // end of the deck: a dark plate with light/mid ink, or a light plate
       // with dark/mid ink. Same draws either way, so the stream is unchanged.
-      const darkPlate = rng.bool(0.5)
+      const darkDraw = rng.bool(0.5)
       const plateDraw = rng.pick(deck.dark)
+      // Light plates skip paper slots too: a near-white ground is the same
+      // empty-looking area as a paper flat cell. A palette whose whole light
+      // end is paper (RSAC Neutrals) gets a dark plate instead.
+      const lightPlates = deck.light.filter((s) => !deck.paper.has(s))
+      const darkPlate = darkDraw || lightPlates.length === 0
+      // `brandPick` (already drawn above, used otherwise only by ramps) picks
+      // uniformly — mapping the dark plate's index across folded unevenly.
       const plateSlot = darkPlate
         ? plateDraw
-        : deck.light[Math.max(0, deck.dark.indexOf(plateDraw)) % Math.max(1, deck.light.length)] ?? plateDraw
+        : lightPlates[Math.min(lightPlates.length - 1, Math.floor(brandPick * lightPlates.length))]
       const inkPool = darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]
       const colors = parsed.groups.map((g) =>
         g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: rng.pick(inkPool), alpha: 1 },
@@ -600,7 +618,9 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
         kind: 'texture',
         patternId: parsed.id,
         colors,
-        scale: rng.float(0.7, 1.6),
+        // Same draw as ever; mapped onto 1–1.8 because a texture cell no
+        // longer renders below scale 1 (it would stop covering the cell).
+        scale: 1 + ((rng.float(0.7, 1.6) - 0.7) / 0.9) * 0.8,
         rotation: rng.bool(0.8) ? 0 : 90,
       }
     }
@@ -986,10 +1006,19 @@ export function shuffleColors(doc: OrbDoc, palette: Palette, seed: string): OrbD
   const sectorPool = rng.shuffle(deck.all)
   let k = 0
   const nextSlot = () => sectorPool[k++ % sectorPool.length]
+  // A flat cell is all area: walk past paper slots (selection only — the
+  // shuffle above is the one draw), as remix's dealing does.
+  const nextAreaSlot = () => {
+    for (let tries = 0; tries < sectorPool.length; tries++) {
+      const s = nextSlot()
+      if (!deck.paper.has(s)) return s
+    }
+    return nextSlot()
+  }
   const shuffleFill = (f: SectorFill): SectorFill => {
     const dealt: SectorFill = (() => {
       if (f.kind === 'photo') return f
-      if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextSlot(), hex: null } }
+      if (f.kind === 'flat') return { ...f, color: { ...f.color, slot: nextAreaSlot(), hex: null } }
       if (f.kind === 'ramp')
         return {
           ...f,

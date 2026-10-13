@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { createReadStream, existsSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+// @ts-expect-error — plain .mjs shared with orbgen and the Pages Function; no types
+import { applyPrefsDiff, emptyPrefs, sanitizePrefs } from './tools/photo-library/prefs-merge.mjs'
 import { join, normalize, sep } from 'node:path'
 
 /**
@@ -14,27 +16,50 @@ function photoLibrary(): Plugin {
   const mount = '/photo-library/'
   const handler = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, next: () => void) => {
     if (!req.url?.startsWith(mount)) return next()
-    // The app-level photo prefs (favorites, hidden, framing) save here so
-    // orbgen shares them. Only this one file is writable.
-    if (req.method === 'PUT' && req.url.split('?')[0] === `${mount}prefs.json`) {
+    // Shared photo curation (favorites, hidden, framing): GET the prefs, POST
+    // a diff — same protocol as orbgen and the hosted library's Pages
+    // Function (tools/photo-library/prefs-merge.mjs). Backed by prefs.json.
+    if (req.url.split('?')[0] === `${mount}prefs`) {
+      const file = join(root, 'prefs.json')
+      const read = () => {
+        try {
+          return sanitizePrefs(JSON.parse(readFileSync(file, 'utf8')))
+        } catch {
+          return emptyPrefs()
+        }
+      }
+      const send = (body: unknown) => {
+        res.setHeader('content-type', 'application/json')
+        res.setHeader('cache-control', 'no-store')
+        res.end(JSON.stringify(body))
+      }
+      if (!existsSync(root)) {
+        res.statusCode = 404
+        return res.end()
+      }
+      if (req.method === 'GET') return send(read())
+      if (req.method !== 'POST') {
+        res.statusCode = 405
+        return res.end()
+      }
       const chunks: Buffer[] = []
       let size = 0
       req.on('data', (c: Buffer) => {
         size += c.length
-        if (size <= 4 * 1024 * 1024) chunks.push(c)
+        if (size <= 1024 * 1024) chunks.push(c)
       })
       req.on('end', () => {
         try {
-          if (size > 4 * 1024 * 1024 || !existsSync(root)) throw new Error('rejected')
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          if (size > 1024 * 1024) throw new Error('too large')
+          const next = applyPrefsDiff(read(), JSON.parse(Buffer.concat(chunks).toString('utf8')))
           const tmp = join(root, '.prefs.json.tmp')
-          writeFileSync(tmp, JSON.stringify(body, null, 1))
-          renameSync(tmp, join(root, 'prefs.json'))
-          res.statusCode = 204
+          writeFileSync(tmp, JSON.stringify(next, null, 1))
+          renameSync(tmp, file)
+          send(next)
         } catch {
           res.statusCode = 400
+          res.end()
         }
-        res.end()
       })
       return
     }

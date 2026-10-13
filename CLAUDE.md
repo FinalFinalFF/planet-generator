@@ -234,11 +234,23 @@ fill-lock the cell (tried and reversed: it pinned the whole structure, so
 Batch dealt one composition nine times). While a photo is pooled its framing
 belongs to the photo: edits reframe the pool entry and every cell showing it.
 
+**The hosted library** (team access): `tools/photo-library/deploy.sh`
+publishes `photo-library/` to a Cloudflare Pages project with an unguessable
+`*.pages.dev` name plus `tools/photo-library/site/` (the `/prefs` Pages
+Function, `_headers` with `noindex` + CORS, `robots.txt`). There is no
+Cloudflare Access in front yet, so **the hosted URL must never appear in the
+public bundle or the repo** — team members get it from an invite link that
+`lib/photoSource.ts` stores per browser. Project, URL and write key live in
+the gitignored `.orbgen-hosted.json`.
+
 **Curation is app-level, like the pattern library's include list**
 (`lib/photoPrefs.ts`, header → Photos page): favorites, hidden photos and a
-per-photo framing override, saved to localStorage and to
-`photo-library/prefs.json` (PUT by the dev server middleware and orbgen) so the
-API shares them. Reframing anywhere goes through `PhotoPrefsApi.reframe`, which
+per-photo framing override, shared through `<library>/prefs` — GET the prefs,
+POST a *diff* — answered identically by the Vite middleware and orbgen
+(`photo-library/prefs.json`) and the hosted Pages Function (KV), all via
+`tools/photo-library/prefs-merge.mjs`. Never send whole prefs: diffs are what
+keep concurrent curators from overwriting each other. No endpoint (public
+site) → localStorage. Reframing anywhere goes through `PhotoPrefsApi.reframe`, which
 sets the override *and* reframes the open document; documents keep their own
 snapshot so presets reproduce.
 

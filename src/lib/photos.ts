@@ -14,6 +14,7 @@
  */
 
 import { createContext, useContext } from 'react'
+import { PHOTO_SOURCE } from './photoSource'
 
 export type Photo = {
   id: string
@@ -159,7 +160,8 @@ export type PhotoMeta = {
 
 /** Library photo ids are namespaced so they can never collide with uploads. */
 export const LIBRARY_PREFIX = 'lib:'
-export const PHOTO_LIBRARY_BASE = '/photo-library'
+/** Local folder by default, or a hosted library from an invite link (see photoSource). */
+export const PHOTO_LIBRARY_BASE = PHOTO_SOURCE.base
 
 type CatalogFile = {
   photos: Array<{

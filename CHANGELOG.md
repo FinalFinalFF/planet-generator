@@ -12,6 +12,76 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: texture cells shifted or too small for their segment
+
+Pete saw texture segments with offset plate edges, gaps, and ring strokes
+poking past the plate. Cause: a texture cell is cover-fit to the cell's
+diagonal × `scale`, and remix dealt scale 0.7–1.6 (the slider went to 0.2) —
+below 1 the tile stops covering the cell. Invisible while most plates were
+transparent; exposed the moment every texture cell got an opaque plate. Two
+other patterns' artwork stops short of its own tile edge, giving a gap even
+at full size.
+
+- The renderer floors a texture cell's scale at 1; the slider starts at 1;
+  remix maps the same draw onto 1–1.8 (stream unchanged, looks change).
+- Every texture cell paints a ground — the exact cell path, in the plate's
+  own color (or the palette end opposite its inks when there is no plate) —
+  before its artwork, so nothing can show through a short tile.
+
+### Added: a hosted photo library for the team (link-only, shared curation)
+
+Pete asked to make the photo pool available to his internal team, behind
+Cloudflare Access eventually, but live now without it.
+
+- **Hosting: a Cloudflare Pages project** (`tools/photo-library/deploy.sh`),
+  not R2 — the available API token has Pages + DNS scopes but not R2,
+  Workers/KV or Access. 3.2 GB / 9,870 files fits Pages' 20,000-file limit;
+  re-deploys upload only changed files.
+- **Link-only until Access exists.** The project has an unguessable
+  `*.pages.dev` name and no custom domain, sends `noindex` everywhere and
+  disallows robots. Crucially the public app bundle never contains the URL:
+  a team member opens an invite link (`orbs.fnfn.us/?library=<url>&key=<k>`),
+  which `lib/photoSource.ts` remembers in localStorage and strips from the
+  address bar (`?library=local` forgets it). Default remains the local
+  `/photo-library`, which 404s on the public site. Known exposure, accepted
+  by Pete: anyone holding the link can view the photos until Access is on.
+- **Shared, editable curation.** The prefs protocol changed from "PUT the
+  whole prefs.json" to `GET <library>/prefs` + `POST` a *diff*, merged
+  server-side by one module (`tools/photo-library/prefs-merge.mjs`) used by
+  the Vite middleware, orbgen and the Pages Function — so concurrent
+  curators don't overwrite each other (per photo, last write wins). The app
+  keeps a confirmed base + a queue of pending diffs (shown merged, flushed
+  debounced, re-applied over the server's answer) and polls every minute
+  for teammates' edits. Writes need the invite link's key (`WRITE_KEY`
+  secret). Storage is a `PREFS` KV binding; until one is bound the function
+  serves the deploy-time prefs.json read-only and the Photos page says so.
+  KV get/put is not atomic — two writes in the same instant can drop one;
+  acceptable for a small team.
+- Deploy-script traps worth remembering: `tr </dev/urandom | head` under
+  `set -euo pipefail` exits silently on SIGPIPE (use `openssl rand`), and
+  macOS bash read `$PROJECT…` as a longer variable name (brace it).
+
+### Fixed: near-white "paper" colors dealt as segment areas
+
+Pete noticed #EEEDE9 (RSAC Spectrum's lightest slot) everywhere, looking
+blank. Measured over 500 default-preset remixes: it was not over-dealt — 9%
+of flat cells, about its 1-in-11 share — but as an *area* (a flat cell or a
+texture plate) a near-white neutral reads as a missing cell, and 140 of 500
+orbs had one. `paperSlots` (OKLab L > 0.9, chroma < 0.03 — #EEEDE9, the
+Neutrals' whites, other palettes' off-whites; not tinted lights like
+#CDE0FD) now stay out of flat cells, light plates and Shuffle's flat cells.
+They remain available as inks, ramp ends and accents. Result: 0 of 500.
+
+- Pool filtering is selection — `pick` draws once whatever the pool size —
+  so the stream is unchanged; outputs change where a paper slot was dealt.
+- A palette whose whole light end is paper (RSAC Neutrals) gets a dark plate
+  instead of falling back to paper — the regression test caught that the
+  "never empty the pool" fallback handed paper straight back.
+- Light plates are now picked uniformly (via the already-drawn `brandPick`);
+  mapping the dark draw's index onto a shorter list doubled one color (27%).
+- Shuffle colors cannot see which texture group is the plate, so it still
+  may land paper on a plate; Remix never does.
+
 ### Fixed: photo and texture cells mis-masked on Figma import
 
 Pete's Figma imports showed a photo cut to a vertical strip of its cell and

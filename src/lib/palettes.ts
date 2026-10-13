@@ -1,5 +1,5 @@
 import type { ColorRef, Palette } from '../types'
-import { luminance, normalizeHex } from './color'
+import { hexToLab, luminance, normalizeHex } from './color'
 
 /**
  * Built-in palettes. Slot 0 is always the darkest/ground tone and the last
@@ -271,6 +271,23 @@ export function refAlpha(ref: ColorRef | undefined): number {
 }
 
 /** Palette slot indices sorted from darkest to lightest. */
+/**
+ * "Paper" slots: near-white and near-neutral (OKLab L > 0.9, chroma < 0.03) —
+ * RSAC Spectrum's #EEEDE9, the Neutrals' whites. Fine as ink, ramp ends and
+ * accents, but as an *area* (a flat segment, a texture's plate) they read as
+ * an empty gap — on a light Figma canvas or a transparent export, a cell that
+ * looks missing. Remix keeps them out of area fills (2026-10-13: 28% of
+ * default-preset remixes had one).
+ */
+export function paperSlots(palette: Palette): Set<number> {
+  const out = new Set<number>()
+  palette.colors.forEach((c, i) => {
+    const { L, a, b } = hexToLab(c)
+    if (L > 0.9 && Math.hypot(a, b) < 0.03) out.add(i)
+  })
+  return out
+}
+
 export function slotsByLightness(palette: Palette): number[] {
   return palette.colors
     .map((c, i) => ({ i, L: luminance(c) }))

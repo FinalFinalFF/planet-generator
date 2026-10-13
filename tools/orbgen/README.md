@@ -108,3 +108,13 @@ processes what is new. Duplicates (same file name and aspect within a source —
 the selects folders re-export the high-res originals) merge into one photo
 tagged with every folder it appeared in. The dev server and orbgen serve it;
 the public site has none.
+
+### Hosting it for the team
+
+`tools/photo-library/deploy.sh` publishes the library to a Cloudflare Pages
+project (link-only: unguessable `*.pages.dev` name, `noindex`, no custom
+domain until Cloudflare Access is set up) with a `/prefs` function for shared
+curation, and prints the team invite link
+(`https://orbs.fnfn.us/?library=…&key=…`). Re-run it after adding photos; only
+changed files upload. Shared curation is read-only until a KV namespace is
+bound to the project as `PREFS`.

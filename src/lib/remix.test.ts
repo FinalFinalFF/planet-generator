@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { remix, remixSection, shuffleColors } from './remix'
 import { applyOrbType, defaultDoc, normalizeDoc } from './defaults'
-import { BUILTIN_PALETTES, paletteById } from './palettes'
+import { BUILTIN_PALETTES, paletteById, paperSlots } from './palettes'
 import type { ParsedPattern } from './patterns/parse'
 import type {
   AccentLayer,
@@ -853,6 +853,26 @@ describe('carried-over inks never make a cell vanish', () => {
     for (const seed of many) {
       const out = remix(doc, seed, deps)
       for (const f of [...out.orb.sectors.rowA, ...out.orb.sectors.rowB]) expect(hidden(f)).toBe(false)
+    }
+  })
+})
+
+describe('paper slots never become area fills', () => {
+  // A near-white neutral as a flat cell or a texture plate reads as a
+  // missing cell (28% of default-preset remixes had one). The fixture palette
+  // (RSAC Neutrals) has three paper slots, so this has teeth.
+  const paper = paperSlots(palette)
+  it('the fixture palette has paper slots to avoid', () => {
+    expect(paper.size).toBeGreaterThan(0)
+  })
+  it('remix deals no paper flat cell or texture plate', () => {
+    const doc: OrbDoc = { ...FIXTURE, orbType: 'segments' }
+    for (let i = 0; i < 120; i++) {
+      const out = remix(doc, `paper-${i}`, deps)
+      for (const f of [...out.orb.sectors.rowA, ...out.orb.sectors.rowB]) {
+        if (f.kind === 'flat') expect(paper.has(f.color.slot)).toBe(false)
+        if (f.kind === 'texture') expect(paper.has(f.colors[0].slot)).toBe(false) // group 0 is the fake Plate
+      }
     }
   })
 })

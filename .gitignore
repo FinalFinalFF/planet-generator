@@ -16,3 +16,8 @@ Frame 468.png
 # repo is public and these are a client's photos. The editor and orbgen read it
 # from disk when present; the public site simply has no photo library.
 /photo-library/
+
+# Hosted photo library: deploy staging (hard links into photo-library/) and
+# the project/URL/write-key record written by tools/photo-library/deploy.sh.
+/.photo-library-deploy/
+/.orbgen-hosted.json

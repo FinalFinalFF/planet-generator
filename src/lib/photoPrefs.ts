@@ -5,14 +5,17 @@
  * documents still snapshot framing into their pool entries and cells, so a
  * preset or an API run stays reproducible.
  *
- * Persisted twice: localStorage (always, per browser) and, where the local
- * photo library is served (dev server, orbgen), `photo-library/prefs.json` on
- * disk — so orbgen and the MCP tools see the same favorites and framing as the
- * editor. That file sits beside the client photos and is untracked with them.
+ * Shared through the library's `/prefs` endpoint wherever there is one: the
+ * dev server and orbgen (backed by `photo-library/prefs.json`) and the hosted
+ * library's Pages Function (backed by KV, shared by the whole team). Clients
+ * send *diffs*, merged server-side (`tools/photo-library/prefs-merge.mjs` —
+ * keep the two halves in step), so concurrent curators do not overwrite each
+ * other. With no endpoint (the public site), prefs live in localStorage.
  */
 
 import { createContext, useContext } from 'react'
 import { PHOTO_LIBRARY_BASE, type PhotoMeta } from './photos'
+import { PHOTO_SOURCE } from './photoSource'
 import type { PoolPhoto } from '../types'
 
 export type Framing = Pick<PoolPhoto, 'zoom' | 'focusX' | 'focusY'>
@@ -24,10 +27,17 @@ export type PhotoPrefs = {
   framing: Record<string, Framing>
 }
 
+/** A change to curation — what a client sends. */
+export type PrefsDiff = {
+  favorites?: { add?: string[]; remove?: string[] }
+  hidden?: { add?: string[]; remove?: string[] }
+  framing?: { set?: Record<string, Framing>; remove?: string[] }
+}
+
 export const EMPTY_PREFS: PhotoPrefs = { favorites: [], hidden: [], framing: {} }
 
 const KEY = 'orbgen.photoPrefs.v1'
-const FILE = `${PHOTO_LIBRARY_BASE}/prefs.json`
+const ENDPOINT = `${PHOTO_LIBRARY_BASE}/prefs`
 
 function sanitize(raw: unknown): PhotoPrefs {
   const r = (raw ?? {}) as Partial<PhotoPrefs>
@@ -44,35 +54,94 @@ function sanitize(raw: unknown): PhotoPrefs {
   return { favorites: ids(r.favorites), hidden: ids(r.hidden), framing }
 }
 
-/** Disk copy first (shared with orbgen), then this browser's copy. */
-export async function loadPhotoPrefs(): Promise<{ prefs: PhotoPrefs; onDisk: boolean }> {
-  try {
-    const res = await fetch(FILE, { cache: 'no-store' })
-    if (res.ok && (res.headers.get('content-type') ?? '').includes('json')) {
-      return { prefs: sanitize(await res.json()), onDisk: true }
-    }
-  } catch {
-    // no local library server — fall through
+/** Same semantics as the server's `applyPrefsDiff`. */
+export function applyPrefsDiff(prefs: PhotoPrefs, d: PrefsDiff): PhotoPrefs {
+  const list = (current: string[], change?: { add?: string[]; remove?: string[] }) => {
+    if (!change) return current
+    const set = new Set(current)
+    for (const id of change.add ?? []) set.add(id)
+    for (const id of change.remove ?? []) set.delete(id)
+    return [...set]
   }
-  try {
-    return { prefs: sanitize(JSON.parse(localStorage.getItem(KEY) ?? 'null')), onDisk: false }
-  } catch {
-    return { prefs: EMPTY_PREFS, onDisk: false }
+  const framing = { ...prefs.framing, ...(d.framing?.set ?? {}) }
+  for (const id of d.framing?.remove ?? []) delete framing[id]
+  return { favorites: list(prefs.favorites, d.favorites), hidden: list(prefs.hidden, d.hidden), framing }
+}
+
+/** Fold a queue of diffs into one, later changes winning per photo. */
+export function combineDiffs(diffs: PrefsDiff[]): PrefsDiff {
+  const fav = new Map<string, boolean>()
+  const hid = new Map<string, boolean>()
+  const frame = new Map<string, Framing | null>()
+  for (const d of diffs) {
+    for (const id of d.favorites?.add ?? []) fav.set(id, true)
+    for (const id of d.favorites?.remove ?? []) fav.set(id, false)
+    for (const id of d.hidden?.add ?? []) hid.set(id, true)
+    for (const id of d.hidden?.remove ?? []) hid.set(id, false)
+    for (const [id, f] of Object.entries(d.framing?.set ?? {})) frame.set(id, f)
+    for (const id of d.framing?.remove ?? []) frame.set(id, null)
+  }
+  const pick = (m: Map<string, boolean>, v: boolean) => [...m].filter(([, x]) => x === v).map(([id]) => id)
+  return {
+    favorites: { add: pick(fav, true), remove: pick(fav, false) },
+    hidden: { add: pick(hid, true), remove: pick(hid, false) },
+    framing: {
+      set: Object.fromEntries([...frame].filter(([, f]) => f !== null) as [string, Framing][]),
+      remove: [...frame].filter(([, f]) => f === null).map(([id]) => id),
+    },
   }
 }
 
-export async function savePhotoPrefs(prefs: PhotoPrefs, toDisk: boolean): Promise<void> {
+export type PrefsBackend = { shared: boolean; writable: boolean }
+
+function readLocal(): PhotoPrefs {
   try {
-    localStorage.setItem(KEY, JSON.stringify(prefs))
+    return sanitize(JSON.parse(localStorage.getItem(KEY) ?? 'null'))
   } catch {
-    // storage full or blocked — the disk copy (if any) still saves
+    return EMPTY_PREFS
   }
-  if (!toDisk) return
-  await fetch(FILE, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(prefs),
-  }).catch(() => undefined)
+}
+
+/** The shared endpoint's prefs, or this browser's copy where there is none. */
+export async function loadPhotoPrefs(): Promise<{ prefs: PhotoPrefs; backend: PrefsBackend }> {
+  try {
+    const res = await fetch(ENDPOINT, { cache: 'no-store' })
+    if (res.ok && (res.headers.get('content-type') ?? '').includes('json')) {
+      return {
+        prefs: sanitize(await res.json()),
+        backend: { shared: true, writable: res.headers.get('x-orbgen-writable') !== '0' },
+      }
+    }
+  } catch {
+    // no library server here (the public site) — fall through
+  }
+  return { prefs: readLocal(), backend: { shared: false, writable: true } }
+}
+
+/**
+ * Send a diff; resolves with the merged prefs the server now holds. Without a
+ * shared endpoint the diff applies to this browser's copy.
+ */
+export async function pushPrefsDiff(diff: PrefsDiff, backend: PrefsBackend): Promise<PhotoPrefs> {
+  if (!backend.shared) {
+    const next = applyPrefsDiff(readLocal(), diff)
+    try {
+      localStorage.setItem(KEY, JSON.stringify(next))
+    } catch {
+      // storage full or blocked
+    }
+    return next
+  }
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(PHOTO_SOURCE.key ? { 'x-orbgen-key': PHOTO_SOURCE.key } : {}),
+    },
+    body: JSON.stringify(diff),
+  })
+  if (!res.ok) throw new Error(res.status === 403 ? 'not allowed to edit shared curation' : `HTTP ${res.status}`)
+  return sanitize(await res.json())
 }
 
 /** The framing a photo gets wherever it is placed: the site-wide override, else detected. */
@@ -83,6 +152,8 @@ export function framingFor(meta: PhotoMeta | undefined, prefs: PhotoPrefs, id?: 
 
 export type PhotoPrefsApi = {
   prefs: PhotoPrefs
+  /** Where curation lives: shared (a library server) or this browser; editable or not. */
+  backend: PrefsBackend & { remote: boolean }
   setFavorite: (id: string, on: boolean) => void
   setHidden: (id: string, on: boolean) => void
   /**
@@ -97,6 +168,7 @@ export type PhotoPrefsApi = {
 
 export const PhotoPrefsContext = createContext<PhotoPrefsApi>({
   prefs: EMPTY_PREFS,
+  backend: { shared: false, writable: true, remote: false },
   setFavorite: () => {},
   setHidden: () => {},
   reframe: () => {},
