@@ -46,6 +46,27 @@ PROJECT="$(jq -r .project "$STATE")"
 URL="$(jq -r .url "$STATE")"
 KEY="$(jq -r .key "$STATE")"
 
+# Shared curation is read-only until the function has a PREFS KV namespace.
+# Bind one if the project lacks it (idempotent; reuses a same-named namespace).
+# Bindings apply to deployments made after the change — the deploy below.
+BOUND="$(curl -s "$CF/$PROJECT" "${AUTH[@]}" | jq -r '.result.deployment_configs.production.kv_namespaces.PREFS.namespace_id // empty')"
+if [ -z "$BOUND" ]; then
+  KVAPI="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+  LIST="$(curl -s "$KVAPI?per_page=100" "${AUTH[@]}")"
+  echo "$LIST" | jq -e '.success' >/dev/null \
+    || { echo "Listing KV namespaces failed (does the API token have Workers KV Storage: Edit?): $(echo "$LIST" | jq -c '.errors')" >&2; exit 1; }
+  NS="$(echo "$LIST" | jq -r --arg t "$PROJECT-prefs" '.result[] | select(.title == $t) | .id' | head -1)"
+  if [ -z "$NS" ]; then
+    echo "Creating KV namespace $PROJECT-prefs…"
+    NS="$(curl -s -X POST "$KVAPI" "${AUTH[@]}" --data "{\"title\":\"$PROJECT-prefs\"}" | jq -r '.result.id // empty')"
+    [ -n "$NS" ] || { echo "KV namespace creation failed" >&2; exit 1; }
+  fi
+  curl -s -X PATCH "$CF/$PROJECT" "${AUTH[@]}" \
+    --data "{\"deployment_configs\":{\"production\":{\"kv_namespaces\":{\"PREFS\":{\"namespace_id\":\"$NS\"}}}}}" \
+    | jq -e '.success' >/dev/null || { echo "Binding PREFS failed" >&2; exit 1; }
+  echo "Bound PREFS KV namespace."
+fi
+
 # A clean upload folder of hard links: only what the site needs, never the
 # local tmp files or anything else that lands in photo-library/.
 rm -rf "$DEPLOY"

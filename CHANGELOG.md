@@ -12,6 +12,20 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: hosted photo curation was read-only
+
+Teammates on the hosted library got "Photo curation is read-only on this
+library for now" on every favorite/hide/reframe. The `/prefs` function only
+writes when a `PREFS` KV namespace is bound, and the first-run branch of
+`deploy.sh` created the project and `WRITE_KEY` but never a namespace — so
+`x-orbgen-writable` was `0` even with the right key (checked with curl). The
+seed `prefs.json` was being served read-only, exactly as designed for an
+unbound function. `deploy.sh` now binds `PREFS` on every run if missing
+(reusing a namespace titled `<project>-prefs`), before the deploy, since
+bindings only reach deployments made after the change. It fails loudly if
+the API token lacks Workers KV access — the shared mcp-skills token did not
+have it at the time, which blocked the first run of this step.
+
 ### Added: lock the number of cells
 
 Pete wanted a batch of two-cell orbs, one cell a photo. The only lock was
