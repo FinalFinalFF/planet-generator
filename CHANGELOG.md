@@ -26,6 +26,13 @@ bindings only reach deployments made after the change. It fails loudly if
 the API token lacks Workers KV access — the shared mcp-skills token did not
 have it at the time, which blocked the first run of this step.
 
+Binding KV was not enough: the banner stayed. The app decides writability
+from the `x-orbgen-writable` header on its *GET*, but only sent the write key
+on POST — and the function computes the header from the key it is shown, so
+a keyless GET always answered `0` and the client never tried to write.
+`loadPhotoPrefs` now sends the key on reads too (the CORS preflight already
+allows the header).
+
 ### Added: lock the number of cells
 
 Pete wanted a batch of two-cell orbs, one cell a photo. The only lock was

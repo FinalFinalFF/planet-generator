@@ -105,7 +105,12 @@ function readLocal(): PhotoPrefs {
 /** The shared endpoint's prefs, or this browser's copy where there is none. */
 export async function loadPhotoPrefs(): Promise<{ prefs: PhotoPrefs; backend: PrefsBackend }> {
   try {
-    const res = await fetch(ENDPOINT, { cache: 'no-store' })
+    // Send the write key on reads too: the server answers x-orbgen-writable
+    // for the key it is shown, so a keyless GET always reads as read-only.
+    const res = await fetch(ENDPOINT, {
+      cache: 'no-store',
+      headers: PHOTO_SOURCE.key ? { 'x-orbgen-key': PHOTO_SOURCE.key } : {},
+    })
     if (res.ok && (res.headers.get('content-type') ?? '').includes('json')) {
       return {
         prefs: sanitize(await res.json()),
