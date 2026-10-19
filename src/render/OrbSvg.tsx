@@ -288,7 +288,15 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
   rows.forEach((row, ri) => {
     const y0 = ri === 0 ? cy - pad : chordY
     const y1 = ri === 0 ? chordY : cy + pad
-    row.forEach((fill, ci) => {
+    row.forEach((cellFill, ci) => {
+      // A photo this browser cannot show (no library connected, a deleted
+      // upload, or still loading) paints as a flat cell rather than a hole —
+      // an empty cell reads as a broken orb. Slots step per cell so adjacent
+      // stand-ins differ; the document itself is untouched.
+      const fill: SectorFill =
+        cellFill.kind === 'photo' && !ctx.photosById.has(cellFill.photoId)
+          ? { kind: 'flat', color: { slot: (2 + ri * 3 + ci) % Math.max(1, palette.colors.length) } }
+          : cellFill
       const edges = rowEdges(row.length, ri === 0 ? s.widthsA : s.widthsB)
       const x0 = ci === 0 ? cx - pad : cx - r + 2 * r * edges[ci]
       const x1 = ci === row.length - 1 ? cx + pad : cx - r + 2 * r * edges[ci + 1]
@@ -307,7 +315,7 @@ function SectorOrb({ ctx }: { ctx: Ctx }) {
 
       if (fill.kind === 'photo') {
         const photo = ctx.photosById.get(fill.photoId)
-        if (!photo) return // library not loaded yet, or the photo was deleted
+        if (!photo) return // unreachable: missing photos became flat cells above
         // Painted as the cell's own path with an *image fill* — no clip. The
         // fill is the structure Figma's own SVG export uses for an image-
         // filled shape (an objectBoundingBox <pattern> holding a <use> of an

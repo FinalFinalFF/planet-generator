@@ -54,6 +54,13 @@ export type RemixDeps = {
   /** Patterns that are parsed and therefore safe to reference. */
   available: ParsedPattern[]
   palette: Palette
+  /**
+   * Which pool photos this browser can actually show (uploads plus the
+   * connected library's catalog). Pool photos it rejects are left out of the
+   * deal, so a pool carried by a preset or document does not paint empty
+   * cells where the library is missing. Absent = every photo is available.
+   */
+  photoAvailable?: (photoId: string) => boolean
 }
 
 /** The fixed candidate widths. Selection uses a prefix; draws always run full. */
@@ -723,7 +730,10 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
 
   // Pool photos need cells to live in, so a live pool steers an unlocked type
   // to segments — a selection over the draw already made, like colorSource.
-  const pool = doc.photoPool
+  // Only photos this browser can show take part — deps state, like `available`.
+  const pool = deps.photoAvailable
+    ? { ...doc.photoPool, photos: doc.photoPool.photos.filter((p) => deps.photoAvailable!(p.photoId)) }
+    : doc.photoPool
   const poolLive = pool.photos.length > 0 && pool.max > 0
   const orbType: OrbType =
     locks.orb || subLocks.orb.type

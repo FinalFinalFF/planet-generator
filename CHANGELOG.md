@@ -12,6 +12,27 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: pool photos the browser cannot show left holes in the orb
+
+Reported as "patterns are busted" in Safari — the patterns were fine. Safari
+had no photo library connected, but the document's pool still listed 21
+`lib:` photos, so every remix dealt photo cells that painted nothing (the
+renderer returned early on a missing photo): half-discs, chopped wedges. Any
+public visitor loading the Single Segment Photos preset got the same.
+
+Two halves, both render/deps-side:
+- `RemixDeps.photoAvailable` (App and Batch pass `photoLibrary.byId.has`)
+  filters the pool before placement and before the pool steers the type to
+  segments. It is deps state, like `available`; the photo picks still come
+  from the full-width `${seed}-photo` stream, so draw counts are unchanged.
+  Absent (tests, `api.tsx`) means every photo is available.
+- `SectorOrb` paints a photo cell whose image is not in `photosById` as a flat
+  cell (slot stepped per cell so neighbours differ) instead of nothing. The
+  doc keeps its `photoId`, so connecting the library brings the photo back.
+  Accepted cost: while a library photo is still loading the cell shows flat
+  for a moment before the photo appears, and an export taken in that window
+  gets the flat.
+
 ### Fixed: hosted photo curation was read-only
 
 Teammates on the hosted library got "Photo curation is read-only on this

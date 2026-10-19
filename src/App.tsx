@@ -475,12 +475,16 @@ export default function App() {
     [notify, update],
   )
 
+  // Remix leaves out pool photos this browser cannot show (no library
+  // connected, or a deleted upload) rather than dealing empty cells.
+  const photoAvailable = useCallback((id: string) => photoLibrary.byId.has(id), [photoLibrary])
+
   const doRemix = useCallback(
     (seed?: string) => {
       const next = seed ?? randomSeed()
-      replace(remix(doc, next, { available, palette }))
+      replace(remix(doc, next, { available, palette, photoAvailable }))
     },
-    [doc, available, palette, replace],
+    [doc, available, palette, photoAvailable, replace],
   )
 
   /**
@@ -502,16 +506,17 @@ export default function App() {
         remix({ ...doc, paletteId: nextPalette.id }, next, {
           available,
           palette: nextPalette,
+          photoAvailable,
         }),
       )
       if (nextPalette.id !== doc.paletteId) notify(`Palette: ${nextPalette.name}`)
     },
-    [doc, palettes, palette, available, replace, notify],
+    [doc, palettes, palette, available, photoAvailable, replace, notify],
   )
 
   const onRandomizeSection = useCallback(
     (section: Exclude<LockSection, 'colors'>) => {
-      replace(remixSection(doc, section, randomSeed(), { available, palette }))
+      replace(remixSection(doc, section, randomSeed(), { available, palette, photoAvailable }))
     },
     [doc, available, palette, replace],
   )

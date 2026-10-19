@@ -11,6 +11,7 @@ import type { Palette, OrbDoc } from '../types'
 import { OrbSvg } from '../render/OrbSvg'
 import { pickPalette, remix } from '../lib/remix'
 import { paletteById } from '../lib/palettes'
+import { usePhotoLibrary } from '../lib/photos'
 import type { ParsedPattern } from '../lib/patterns/parse'
 import { Check, Segmented } from './controls'
 
@@ -176,6 +177,8 @@ export function BatchPanel({
    * still end up showing the current document.
    */
   const deferredDoc = useDeferredValue(doc)
+  const photoLibrary = usePhotoLibrary()
+  const photoAvailable = useCallback((id: string) => photoLibrary.byId.has(id), [photoLibrary])
 
   const cells = useMemo<BatchCell[]>(() => {
     // Shadowed deliberately: everything below must read the deferred document,
@@ -191,9 +194,9 @@ export function BatchPanel({
           ? pickPalette(palettes, seed, doc.paletteId)
           : paletteById(palettes, doc.paletteId)
       const source = varyPalette ? { ...doc, paletteId: palette.id } : doc
-      return { seed, doc: remix(source, seed, { available, palette }), palette }
+      return { seed, doc: remix(source, seed, { available, palette, photoAvailable }), palette }
     })
-  }, [cols, batchSeed, varyPalette, deferredDoc, palettes, available])
+  }, [cols, batchSeed, varyPalette, deferredDoc, palettes, available, photoAvailable])
 
   // Stable identity: a fresh callback per render would defeat the memo on
   // BatchCellView, and would also make React detach and re-attach every ref.
