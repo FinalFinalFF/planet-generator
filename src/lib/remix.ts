@@ -48,7 +48,7 @@ import { sectorCellAreas } from './geometry'
 import { DEFAULT_LAYER_MASK, nextId } from './defaults'
 import type { ParsedPattern } from './patterns/parse'
 import { paperSlots, slotsByLightness } from './palettes'
-import { PICKABLE_BRAND_GRADIENTS, brandGradientFor } from './brand'
+import { brandGradientAt, brandGradientFor } from './brand'
 
 export type RemixDeps = {
   /** Patterns that are parsed and therefore safe to reference. */
@@ -224,8 +224,7 @@ function selectGradient(
   lockColors: boolean,
 ): Gradient {
   if (lockColors || doc.colorSource !== 'gradients') return candidate
-  const pool = PICKABLE_BRAND_GRADIENTS
-  const brand = pool[Math.min(pool.length - 1, Math.floor(brandPick * pool.length))]
+  const brand = brandGradientAt(brandPick)
   return brandGradientFor(brand, palette, candidate)
 }
 
@@ -688,8 +687,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // gradient's endpoints instead of the dealt slots. Pure selection over
       // draws already made; the colors lock re-inks over it later either way.
       if (doc.colorSource === 'gradients' && !locks.colors) {
-        const pool = PICKABLE_BRAND_GRADIENTS
-        const brand = pool[Math.min(pool.length - 1, Math.floor(brandPick * pool.length))]
+        const brand = brandGradientAt(brandPick)
         const first = brand.stops[0]
         const last = brand.stops[brand.stops.length - 1]
         return {

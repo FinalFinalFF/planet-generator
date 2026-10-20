@@ -12,6 +12,18 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: brand gradients deal by weight
+
+Under the Gradients color source Pete wanted less Atmosphere, Horizon,
+Spectrum, Current and Glow — the same pale / purple / alarm-red families the
+palette weights just held back. `BrandGradient.weight` (default 1) and
+`brandGradientAt(u)` replace the two uniform `pool[floor(u·n)]` lookups in
+remix (disc and background gradients via `selectGradient`, ramp cells in
+`dealFill`); those five sit at 0.5. Exact shares, since the pick is a direct
+map of the already-drawn `brandPick`: each held-back gradient 10% → 6.7%,
+each of the other five 10% → 13.3%. No new draws, so seeds keep their
+structure. Pickers still list every gradient — weight only steers remix.
+
 ### Changed: `Palette.primary` became per-slot `Palette.weights`
 
 Same day as the primary weighting below, Pete asked for two non-row rules:

@@ -24,6 +24,8 @@ export type BrandGradient = {
   chained: boolean
   /** Reserved for the logomark — shipped for completeness, shown in no picker. */
   reserved?: boolean
+  /** Remix dealing weight (default 1). Pickers list every gradient regardless. */
+  weight?: number
 }
 
 /**
@@ -35,13 +37,13 @@ export type BrandGradient = {
  * verbatim.
  */
 export const BRAND_GRADIENTS: BrandGradient[] = [
-  { id: 'rsac-atmosphere', name: 'Atmosphere', angle: 180, chained: true,
+  { id: 'rsac-atmosphere', name: 'Atmosphere', angle: 180, chained: true, weight: 0.5,
     stops: [{ offset: 0, hex: '#FDF9F6' }, { offset: 1, hex: '#CDE0FD' }] },
-  { id: 'rsac-horizon', name: 'Horizon', angle: 180, chained: true,
+  { id: 'rsac-horizon', name: 'Horizon', angle: 180, chained: true, weight: 0.5,
     stops: [{ offset: 0, hex: '#CDE0FD' }, { offset: 1, hex: '#B08ADA' }] },
-  { id: 'rsac-spectrum', name: 'Spectrum', angle: 180, chained: true,
+  { id: 'rsac-spectrum', name: 'Spectrum', angle: 180, chained: true, weight: 0.5,
     stops: [{ offset: 0, hex: '#B08ADA' }, { offset: 1, hex: '#DB4750' }] },
-  { id: 'rsac-current', name: 'Current', angle: 180, chained: true,
+  { id: 'rsac-current', name: 'Current', angle: 180, chained: true, weight: 0.5,
     stops: [{ offset: 0, hex: '#DB4750' }, { offset: 1, hex: '#EA6F53' }] },
   { id: 'rsac-radiance', name: 'Radiance', angle: 180, chained: true,
     stops: [
@@ -49,7 +51,7 @@ export const BRAND_GRADIENTS: BrandGradient[] = [
       { offset: 0.4424, hex: '#F39530' },
       { offset: 1, hex: '#FFC505' },
     ] },
-  { id: 'rsac-glow', name: 'Glow', angle: 180, chained: true,
+  { id: 'rsac-glow', name: 'Glow', angle: 180, chained: true, weight: 0.5,
     stops: [{ offset: 0, hex: '#FFC505' }, { offset: 1, hex: '#E1C5CE' }] },
   { id: 'rsac-shift', name: 'Shift', angle: 180, chained: true,
     stops: [{ offset: 0, hex: '#E1C5CE' }, { offset: 1, hex: '#D893A8' }] },
@@ -67,6 +69,23 @@ export const BRAND_GRADIENTS: BrandGradient[] = [
 
 /** The pickable set — everything but the reserved logomark gradient. */
 export const PICKABLE_BRAND_GRADIENTS = BRAND_GRADIENTS.filter((g) => !g.reserved)
+
+/**
+ * The gradient remix deals for an already-drawn unit float, by `weight`.
+ * Atmosphere, Horizon, Spectrum, Current and Glow sit at half weight
+ * (2026-10-20, Pete): too pale, too purple or too alarm-red in quantity.
+ * Pure selection — the caller's one draw is the only randomness.
+ */
+export function brandGradientAt(u: number): BrandGradient {
+  const pool = PICKABLE_BRAND_GRADIENTS
+  const w = (g: BrandGradient) => Math.max(0, g.weight ?? 1)
+  let r = u * pool.reduce((t, g) => t + w(g), 0)
+  for (const g of pool) {
+    r -= w(g)
+    if (r < 0) return g
+  }
+  return pool[pool.length - 1]
+}
 
 /** Nearest palette slot to a hex, perceptually (OKLab distance). */
 export function nearestSlot(hex: string, palette: Palette): number {
