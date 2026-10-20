@@ -76,8 +76,11 @@ export const PICKABLE_BRAND_GRADIENTS = BRAND_GRADIENTS.filter((g) => !g.reserve
  * (2026-10-20, Pete): too pale, too purple or too alarm-red in quantity.
  * Pure selection — the caller's one draw is the only randomness.
  */
-export function brandGradientAt(u: number): BrandGradient {
-  const pool = PICKABLE_BRAND_GRADIENTS
+export function brandGradientAt(u: number, keep?: (g: BrandGradient) => boolean): BrandGradient {
+  // `keep` narrows the pool (remix keeps look-alikes of a neighbour out);
+  // a filter that would empty it is ignored.
+  const kept = keep ? PICKABLE_BRAND_GRADIENTS.filter(keep) : PICKABLE_BRAND_GRADIENTS
+  const pool = kept.length > 0 ? kept : PICKABLE_BRAND_GRADIENTS
   const w = (g: BrandGradient) => Math.max(0, g.weight ?? 1)
   let r = u * pool.reduce((t, g) => t + w(g), 0)
   for (const g of pool) {

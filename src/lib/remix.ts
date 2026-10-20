@@ -48,6 +48,7 @@ import { sectorCellAreas } from './geometry'
 import { DEFAULT_LAYER_MASK, nextId } from './defaults'
 import type { ParsedPattern } from './patterns/parse'
 import { paperSlots, slotsByLightness } from './palettes'
+import { hexToLab, labDistance, type Lab } from './color'
 import { brandGradientAt, brandGradientFor } from './brand'
 
 export type RemixDeps = {
@@ -623,6 +624,27 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
   // segment cell (found 2026-08-25: 0 of 31 file patterns in 228 dealt
   // cells). The Library's include-toggles are the curation surface now.
   const cellPool = deps.available
+  // Each cell's dominant ink (flat color, both ramp ends, texture plate) is
+  // kept out of every later cell's pools, so two big neighbours never share
+  // a color — weighted primaries made that common (Rose twice at 2×,
+  // 2026-10-20). Look-alikes count as the same ink: on RSAC Spectrum that
+  // pairs the two navies, light blue with paper and with pale pink, purple
+  // with rose, red with orange. Candidates deal in a fixed order (row A, then
+  // row B), and filtering a pool is selection: each pick still draws exactly
+  // once. Filtering falls back to exact repeats only, then to the full pool,
+  // rather than empty it.
+  // `used` holds colors, not slots, so brand-gradient ramps (literal hexes
+  // under the Gradients color source) take part too.
+  const labs = palette.colors.map(hexToLab)
+  const NEAR = 0.13
+  const used: Lab[] = []
+  const apartFromUsed = (c: Lab) => used.every((u) => labDistance(c, u) >= NEAR)
+  const fresh = (pool: number[]): number[] => {
+    const apart = pool.filter((s) => apartFromUsed(labs[s]))
+    if (apart.length > 0) return apart
+    const unused = pool.filter((s) => used.every((u) => labDistance(labs[s], u) > 0))
+    return unused.length > 0 ? unused : pool
+  }
   const dealFill = (): SectorFill => {
     const kind = rng.weighted(['flat', 'ramp', 'texture'] as const, [0.4, 0.2, 0.4])
     // Never deal the ground slot as a flat cell: the background is almost
@@ -631,13 +653,13 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     // neutral), which reads as a missing cell — see `paperSlots`. Pool
     // filtering is selection: `pick` draws once whatever the pool's size.
     const flatPool = withoutPaper(deck.all.filter((s) => s !== deck.dark[0]), deck)
-    const slotA = dealSlot(rng, flatPool.length > 0 ? flatPool : deck.all, deck)
+    const slotA = dealSlot(rng, fresh(flatPool.length > 0 ? flatPool : deck.all), deck)
     // A ramp ends anywhere in the light or mid band, never on its own start.
     // It used to end in the light third only — with flats and light plates
     // also leaning light, the three lightest non-paper inks took ~37% of all
     // cell area against a fair 25% (2026-10-20). Still one draw.
     const rampEnds = [...deck.light, ...deck.mid].filter((s) => s !== slotA)
-    const slotB = dealSlot(rng, rampEnds.length > 0 ? rampEnds : deck.light, deck)
+    const slotB = dealSlot(rng, fresh(rampEnds.length > 0 ? rampEnds : deck.light), deck)
     const rampAngle = rng.int(0, 359)
     const brandPick = rng.float(0, 1)
     if (kind === 'texture' && cellPool.length > 0) {
@@ -649,7 +671,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // end of the deck: a dark plate with light/mid ink, or a light plate
       // with dark/mid ink. Same draws either way, so the stream is unchanged.
       const darkDraw = rng.bool(0.5)
-      const plateDraw = dealSlot(rng, deck.dark, deck)
+      const plateDraw = dealSlot(rng, fresh(deck.dark), deck)
       // Light plates skip paper slots too: a near-white ground is the same
       // empty-looking area as a paper flat cell. A palette whose whole light
       // end is paper (RSAC Neutrals) gets a dark plate instead.
@@ -663,7 +685,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // uniformly — mapping the dark plate's index across folded unevenly.
       const plateSlot = darkPlate
         ? plateDraw
-        : slotAt(lightPlates, brandPick, deck)
+        : slotAt(fresh(lightPlates), brandPick, deck)
       // Ink never matches its own plate — now possible with a mid plate.
       const inkCands = (darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]).filter(
         (s) => s !== plateSlot,
@@ -672,6 +694,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       const colors = parsed.groups.map((g) =>
         g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: dealSlot(rng, inkPool, deck), alpha: 1 },
       )
+      used.push(labs[plateSlot])
       return {
         kind: 'texture',
         patternId: parsed.id,
@@ -687,9 +710,11 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // gradient's endpoints instead of the dealt slots. Pure selection over
       // draws already made; the colors lock re-inks over it later either way.
       if (doc.colorSource === 'gradients' && !locks.colors) {
-        const brand = brandGradientAt(brandPick)
+        const ends = (g: { stops: { hex: string }[] }) => [g.stops[0].hex, g.stops[g.stops.length - 1].hex]
+        const brand = brandGradientAt(brandPick, (g) => ends(g).every((h) => apartFromUsed(hexToLab(h))))
         const first = brand.stops[0]
         const last = brand.stops[brand.stops.length - 1]
+        used.push(hexToLab(first.hex), hexToLab(last.hex))
         return {
           kind: 'ramp',
           from: { slot: slotA, hex: first.hex },
@@ -697,8 +722,10 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
           angle: brand.angle,
         }
       }
+      used.push(labs[slotA], labs[slotB])
       return { kind: 'ramp', from: { slot: slotA }, to: { slot: slotB }, angle: rampAngle }
     }
+    used.push(labs[slotA])
     return { kind: 'flat', color: { slot: slotA } }
   }
   const rowACountRoll = rng.weighted([1, 2, 3], [0.5, 0.36, 0.14])

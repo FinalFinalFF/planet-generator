@@ -28,12 +28,13 @@ export const BUILTIN_PALETTES: Palette[] = [
     name: 'RSAC Spectrum',
     builtin: true,
     // Cell-deal weights (2026-10-20, Pete): the brand board's primary row
-    // (Navy, Rose, Yellow, Aqua; = RSAC Main) at 2, secondaries at 1. Orange
-    // and red at half their row — red/orange reads as alarm in security —
-    // and Light Blue and Purple at half too, because as big flat fields they
-    // washed the collage out.
+    // leads at 2 (Navy, Yellow, Aqua), secondaries at 1. Orange and red at
+    // half their row — red/orange reads as alarm in security — and Light Blue
+    // and Purple at half too, because as big flat fields they washed the
+    // collage out. Rose (primary) at 1 and pale pink at 0.5: at 2 + 1 the two
+    // pinks took ~23% of cell area and batches read pink.
     //         002F4B 00396C 436083 DB4750 EA6F53 B08ADA D893A8 E1C5CE FFC505 68F5D3 CDE0FD EEEDE9
-    weights: [1,     2,     1,     0.5,   1,     0.5,   2,     1,     2,     2,     1,     1],
+    weights: [1,     2,     1,     0.5,   1,     0.5,   1,     0.5,   2,     2,     1,     1],
     colors: [
       '#002F4B', '#00396C', '#436083', '#DB4750', '#EA6F53', '#B08ADA',
       '#D893A8', '#E1C5CE', '#FFC505', '#68F5D3', '#CDE0FD', '#EEEDE9',

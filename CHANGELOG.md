@@ -12,6 +12,31 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Fixed: two big segments in the same (or a look-alike) color; less pink
+
+Pete flagged orbs where two large cells wore one color, and batches that read
+pink. Measured over 2,000 RSAC Spectrum remixes: 42% of orbs had two cells
+in the same dominant ink, 53% the same or a look-alike, and Rose + pale pink
+took 23% of cell area — weighting Rose 2× (primary) made repeats likelier.
+
+- `dealFill` now keeps a list of the colors already dealt in this orb (flat
+  ink, both ramp ends, texture plate) and filters every later cell's pools
+  against it, treating colors within OKLab `labDistance` 0.13 as the same
+  ink (on Spectrum: the two navies, light blue with paper and pale pink,
+  purple with rose, red with orange). Filtering is selection — each pick
+  still draws once — falling back to exact-repeat-only, then the full pool,
+  rather than emptying it. The list holds Lab colors, not slots, because
+  under the Gradients color source ramp cells wear brand-gradient hexes:
+  the first QA grid still showed orange-on-orange from Radiance ramps until
+  `brandGradientAt` took a `keep` filter and joined the rule.
+- Rose 2 → 1, pale pink 1 → 0.5 in RSAC Spectrum's weights.
+
+After: same dominant ink 0.1% of orbs, same-or-look-alike 5.5%, pinks 14.6%
+of area. Known gap: texture *ink* is not in the rule, so a dense pattern's
+lines can still match a neighbour's flat — thin strokes, not a field.
+Side effect: excluding a dealt heavy pushes later picks toward the rest, so
+orange and red each rose ~1.5 points of area (still below the leaders).
+
 ### Changed: brand gradients deal by weight
 
 Under the Gradients color source Pete wanted less Atmosphere, Horizon,
