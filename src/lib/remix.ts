@@ -614,7 +614,12 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     // filtering is selection: `pick` draws once whatever the pool's size.
     const flatPool = withoutPaper(deck.all.filter((s) => s !== deck.dark[0]), deck)
     const slotA = rng.pick(flatPool.length > 0 ? flatPool : deck.all)
-    const slotB = rng.pick(deck.light)
+    // A ramp ends anywhere in the light or mid band, never on its own start.
+    // It used to end in the light third only — with flats and light plates
+    // also leaning light, the three lightest non-paper inks took ~37% of all
+    // cell area against a fair 25% (2026-10-20). Still one draw.
+    const rampEnds = [...deck.light, ...deck.mid].filter((s) => s !== slotA)
+    const slotB = rng.pick(rampEnds.length > 0 ? rampEnds : deck.light)
     const rampAngle = rng.int(0, 359)
     const brandPick = rng.float(0, 1)
     if (kind === 'texture' && cellPool.length > 0) {
@@ -630,14 +635,22 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // Light plates skip paper slots too: a near-white ground is the same
       // empty-looking area as a paper flat cell. A palette whose whole light
       // end is paper (RSAC Neutrals) gets a dark plate instead.
-      const lightPlates = deck.light.filter((s) => !deck.paper.has(s))
+      // A light plate may also be a mid ink: the light third alone left three
+      // plate colors on RSAC Spectrum, so every light-plated texture wore
+      // blue, yellow or mint (2026-10-20). The paper rule above still holds.
+      const lightEnd = deck.light.filter((s) => !deck.paper.has(s))
+      const lightPlates = lightEnd.length > 0 ? withoutPaper([...lightEnd, ...deck.mid], deck) : []
       const darkPlate = darkDraw || lightPlates.length === 0
       // `brandPick` (already drawn above, used otherwise only by ramps) picks
       // uniformly — mapping the dark plate's index across folded unevenly.
       const plateSlot = darkPlate
         ? plateDraw
         : lightPlates[Math.min(lightPlates.length - 1, Math.floor(brandPick * lightPlates.length))]
-      const inkPool = darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]
+      // Ink never matches its own plate — now possible with a mid plate.
+      const inkCands = (darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]).filter(
+        (s) => s !== plateSlot,
+      )
+      const inkPool = inkCands.length > 0 ? inkCands : deck.all
       const colors = parsed.groups.map((g) =>
         g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: rng.pick(inkPool), alpha: 1 },
       )

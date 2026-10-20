@@ -12,6 +12,23 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: cell colors deal evenly across the palette
+
+Batches read samey even before Vary palette: with RSAC Spectrum the three
+lightest non-paper inks (#CDE0FD, #FFC505, #68F5D3) took 12.6–12.8% of cell
+area each against a fair 8.3% — measured by area over 2,000 remixes. Two
+pools leaned light on top of an already-uniform flat deal: ramp cells always
+*ended* in the light third, and light texture plates could only be the light
+third minus paper — three colors on Spectrum. Now ramp ends draw from light
++ mid (never their own start slot) and light plates from light + mid
+non-paper; the ink pool excludes the plate slot, since a mid plate could
+otherwise meet a matching mid ink. A palette whose light end is all paper
+(RSAC Neutrals) still gets dark plates. After: every Spectrum ink 8.5–9.9%,
+with the darkest navy (4.5%, kept out of flats as the usual ground) and
+paper (2.5%) low on purpose; RSAC Main's top share fell 23.5% → 19.4%.
+Pure selection — one `pick` each as before — so seeds keep their structure;
+only colors move (checked on a fixed-seed 25-up grid).
+
 ### Fixed: pool photos the browser cannot show left holes in the orb
 
 Reported as "patterns are busted" in Safari — the patterns were fine. Safari

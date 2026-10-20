@@ -318,7 +318,7 @@ async function generate(req: GenerateRequest = {}): Promise<GenerateResult> {
     if (photos.has(id)) continue
     const meta = id.startsWith(LIBRARY_PREFIX) ? (await library()).find((m) => m.id === id) : undefined
     if (meta) photos.set(id, await loadLibraryPhoto(meta))
-    else notes.push(`Photo ${id} is not available here; its cells render empty.`)
+    else notes.push(`Photo ${id} is not available here; its cells render as flat color.`)
   }
 
   let available = [...parsedById.values()]
