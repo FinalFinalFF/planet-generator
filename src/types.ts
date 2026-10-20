@@ -299,6 +299,12 @@ export type Palette = {
   id: string
   name: string
   colors: string[]
+  /**
+   * Slots the brand calls primary. Remix deals them twice as often as the
+   * rest in segment cells, so a primary-plus-secondary palette reads as led
+   * by its primaries. Absent = every slot weighs the same.
+   */
+  primary?: number[]
   /** Built-ins can be duplicated but not edited in place. */
   builtin?: boolean
 }

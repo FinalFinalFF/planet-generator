@@ -12,6 +12,22 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Added: primary slots weight the segment cell deal
+
+The even deal (below) made RSAC Spectrum's primaries and secondaries equal —
+primaries 56% of cell area, a near 50/50 — while the brand board leads with
+the primary row (Light Blue, Orange, Yellow, Rose, Aqua, Navy = RSAC Main).
+`Palette.primary` lists those slots; remix's segment-cell picks (flat ink,
+ramp ends, dark and light plates, texture ink) weight them 2:1 via
+`dealSlot`, a `rng.weighted` that consumes exactly the one draw `pick` did,
+and `slotAt` for the light plate, which indexes the already-drawn
+`brandPick`. Seeds keep their structure. Result over 2,000 remixes:
+primaries 71% (each 11–13%), secondaries ~6% each, darkest navy and paper
+still held low by their own guards. Only RSAC Spectrum is marked; other
+palettes deal evenly, and a duplicated palette drops the marking because its
+colors can then be edited out from under the slot indices. Pattern layers,
+accents and the disc gradient are untouched — this is the cell deal only.
+
 ### Changed: cell colors deal evenly across the palette
 
 Batches read samey even before Vary palette: with RSAC Spectrum the three

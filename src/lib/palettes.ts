@@ -27,6 +27,9 @@ export const BUILTIN_PALETTES: Palette[] = [
     id: 'rsac-spectrum',
     name: 'RSAC Spectrum',
     builtin: true,
+    // The brand board's top row — Light Blue, Orange, Yellow, Rose, Aqua,
+    // Navy (= RSAC Main); the rest is the secondary row.
+    primary: [1, 4, 6, 8, 9, 10],
     colors: [
       '#002F4B', '#00396C', '#436083', '#DB4750', '#EA6F53', '#B08ADA',
       '#D893A8', '#E1C5CE', '#FFC505', '#68F5D3', '#CDE0FD', '#EEEDE9',

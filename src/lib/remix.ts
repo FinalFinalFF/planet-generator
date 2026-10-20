@@ -96,6 +96,8 @@ type Deck = {
   all: number[]
   /** Near-white neutrals — kept out of area fills (see `paperSlots`). */
   paper: Set<number>
+  /** Dealing weight per slot: 2 for a palette's primary slots, else 1. */
+  weight: (slot: number) => number
 }
 
 function buildDeck(palette: Palette): Deck {
@@ -107,7 +109,24 @@ function buildDeck(palette: Palette): Deck {
     light: byL.slice(-third).reverse(),
     all: byL,
     paper: paperSlots(palette),
+    weight: (slot) => (palette.primary?.includes(slot) ? 2 : 1),
   }
+}
+
+/** A slot from `pool`, primaries favored. One draw, exactly like `pick`. */
+function dealSlot(rng: Rng, pool: number[], deck: Deck): number {
+  return rng.weighted(pool, pool.map(deck.weight))
+}
+
+/** The weighted counterpart of indexing a pool with an already-drawn unit float. */
+function slotAt(pool: number[], u: number, deck: Deck): number {
+  const total = pool.reduce((t, s) => t + deck.weight(s), 0)
+  let r = u * total
+  for (const s of pool) {
+    r -= deck.weight(s)
+    if (r < 0) return s
+  }
+  return pool[pool.length - 1]
 }
 
 /** A pool without its paper slots — unless that would empty it. */
@@ -613,13 +632,13 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
     // neutral), which reads as a missing cell — see `paperSlots`. Pool
     // filtering is selection: `pick` draws once whatever the pool's size.
     const flatPool = withoutPaper(deck.all.filter((s) => s !== deck.dark[0]), deck)
-    const slotA = rng.pick(flatPool.length > 0 ? flatPool : deck.all)
+    const slotA = dealSlot(rng, flatPool.length > 0 ? flatPool : deck.all, deck)
     // A ramp ends anywhere in the light or mid band, never on its own start.
     // It used to end in the light third only — with flats and light plates
     // also leaning light, the three lightest non-paper inks took ~37% of all
     // cell area against a fair 25% (2026-10-20). Still one draw.
     const rampEnds = [...deck.light, ...deck.mid].filter((s) => s !== slotA)
-    const slotB = rng.pick(rampEnds.length > 0 ? rampEnds : deck.light)
+    const slotB = dealSlot(rng, rampEnds.length > 0 ? rampEnds : deck.light, deck)
     const rampAngle = rng.int(0, 359)
     const brandPick = rng.float(0, 1)
     if (kind === 'texture' && cellPool.length > 0) {
@@ -631,7 +650,7 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // end of the deck: a dark plate with light/mid ink, or a light plate
       // with dark/mid ink. Same draws either way, so the stream is unchanged.
       const darkDraw = rng.bool(0.5)
-      const plateDraw = rng.pick(deck.dark)
+      const plateDraw = dealSlot(rng, deck.dark, deck)
       // Light plates skip paper slots too: a near-white ground is the same
       // empty-looking area as a paper flat cell. A palette whose whole light
       // end is paper (RSAC Neutrals) gets a dark plate instead.
@@ -645,14 +664,14 @@ export function remix(doc: OrbDoc, seed: string, deps: RemixDeps): OrbDoc {
       // uniformly — mapping the dark plate's index across folded unevenly.
       const plateSlot = darkPlate
         ? plateDraw
-        : lightPlates[Math.min(lightPlates.length - 1, Math.floor(brandPick * lightPlates.length))]
+        : slotAt(lightPlates, brandPick, deck)
       // Ink never matches its own plate — now possible with a mid plate.
       const inkCands = (darkPlate ? [...deck.light, ...deck.mid] : [...deck.dark, ...deck.mid]).filter(
         (s) => s !== plateSlot,
       )
       const inkPool = inkCands.length > 0 ? inkCands : deck.all
       const colors = parsed.groups.map((g) =>
-        g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: rng.pick(inkPool), alpha: 1 },
+        g.isBackground ? { slot: plateSlot, alpha: 1 } : { slot: dealSlot(rng, inkPool, deck), alpha: 1 },
       )
       return {
         kind: 'texture',
