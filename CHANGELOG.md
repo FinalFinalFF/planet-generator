@@ -12,6 +12,20 @@ Newest first. Keep entries honest: record reversals and dead ends, not just wins
 
 ## Unreleased
 
+### Changed: `Palette.primary` became per-slot `Palette.weights`
+
+Same day as the primary weighting below, Pete asked for two non-row rules:
+red/orange at half weight (alarm colors in a security brand) and less of
+Light Blue and Purple, which still landed as large flat fields that washed
+the collage out. A primary-slot list cannot say "half", so it became
+`weights` parallel to `colors` (missing = 1). RSAC Spectrum: Navy, Rose,
+Yellow, Aqua 2; Orange 1 (half its row); Red, Purple 0.5; Light Blue 1;
+others 1. Over 2,000 remixes Orange 12.4% → 7.7% of cell area, Light Blue's
+flat-field share 13.0% → 7.4%, Purple 6.1% → 4.0%, Red 5.7% → 4.0%; the four
+weight-2 primaries now lead at 13–15% each. Same single-draw picks, so seeds
+keep their structure. A weight lowers odds, it does not forbid: individual
+seeds still deal a big light-blue or red field.
+
 ### Added: primary slots weight the segment cell deal
 
 The even deal (below) made RSAC Spectrum's primaries and secondaries equal —

@@ -96,7 +96,7 @@ type Deck = {
   all: number[]
   /** Near-white neutrals — kept out of area fills (see `paperSlots`). */
   paper: Set<number>
-  /** Dealing weight per slot: 2 for a palette's primary slots, else 1. */
+  /** Dealing weight per slot, from `palette.weights` (default 1). */
   weight: (slot: number) => number
 }
 
@@ -109,11 +109,11 @@ function buildDeck(palette: Palette): Deck {
     light: byL.slice(-third).reverse(),
     all: byL,
     paper: paperSlots(palette),
-    weight: (slot) => (palette.primary?.includes(slot) ? 2 : 1),
+    weight: (slot) => Math.max(0, palette.weights?.[slot] ?? 1),
   }
 }
 
-/** A slot from `pool`, primaries favored. One draw, exactly like `pick`. */
+/** A slot from `pool` by palette weight. One draw, exactly like `pick`. */
 function dealSlot(rng: Rng, pool: number[], deck: Deck): number {
   return rng.weighted(pool, pool.map(deck.weight))
 }
